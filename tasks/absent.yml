@@ -32,3 +32,13 @@
   loop_control:
     label: "{{ item.item }}"
   when: item.stat.islnk | default(false) and item.stat.lnk_target == '/dev/null'
+
+- name: Wants links and ordering drop-ins the role made are removed
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop: >-
+    {{ drbd_graceful_units
+    | map('regex_replace', '^', '/etc/systemd/system/' ~ drbd_graceful_shutdown_wanted_by ~ '.wants/')
+    + drbd_graceful_down_units
+    | map('regex_replace', '^(.*)$', '/etc/systemd/system/\1.d/' ~ drbd_graceful_dropin) }}

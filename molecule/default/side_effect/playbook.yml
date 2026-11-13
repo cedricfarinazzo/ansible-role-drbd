@@ -1,5 +1,5 @@
 ---
-# Graceful units masked, then state absent removes everything the role added.
+# Masked graceful units, then wanted ones with the ordering drop-in, then state absent removes everything the role added.
 - name: Mask the graceful units
   hosts: all
   roles:
@@ -15,18 +15,59 @@
           [ -e /lib/systemd/system/$u.service ] || continue
           n=$((n + 1))
           [ "$(systemctl is-enabled $u.service 2>&1)" = masked ] || fail "$u not masked"
+          [ ! -e /etc/systemd/system/multi-user.target.wants/$u.service ] || fail "$u still wanted"
+          [ ! -e /etc/systemd/system/$u.service.d/50-drbd-role.conf ] || fail "$u drop-in left"
         done
         [ "$n" -gt 0 ] || fail "no graceful unit shipped"
       args:
         executable: /bin/bash
       changed_when: false
 
-- name: Remove DRBD
+- name: Graceful shutdown wanted and ordered
   hosts: all
   roles:
     - role: ../../../../ansible-role-drbd
       vars:
+        drbd_graceful_shutdown: true
+        drbd_graceful_shutdown_before:
+          - example-guests.service
+  post_tasks:
+    - name: The wants links and the drop-ins are there
+      ansible.builtin.shell: |
+        fail() { echo "FAIL: $*"; exit 1; }
+        n=0
+        for u in drbd-graceful-shutdown drbd-graceful-down; do
+          [ -e /lib/systemd/system/$u.service ] || continue
+          n=$((n + 1))
+          [ -L /etc/systemd/system/multi-user.target.wants/$u.service ] || fail "$u not wanted"
+          grep -q 'Before=example-guests.service' /etc/systemd/system/$u.service.d/50-drbd-role.conf || fail "$u drop-in missing"
+        done
+        [ "$n" -gt 0 ] || fail "no graceful down unit shipped"
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+- name: Remove DRBD
+  hosts: all
+  pre_tasks:
+    # The mask path of absent: a mask the role would make, next to the wants links and drop-ins left by the play above
+    - name: A mask on the graceful units, as the role makes it
+      ansible.builtin.file:
+        src: /dev/null
+        dest: /etc/systemd/system/{{ item }}
+        state: link
+      loop:
+        - drbd-graceful-disconnect.service
+    - name: Wants links and drop-ins are present before absent runs
+      ansible.builtin.shell: ls /etc/systemd/system/multi-user.target.wants/drbd-graceful-*.service /etc/systemd/system/drbd-graceful-*.service.d/50-drbd-role.conf
+      changed_when: false
+  roles:
+    - role: ../../../../ansible-role-drbd
+      vars:
         drbd_state: absent
+        drbd_graceful_shutdown: true
+        drbd_graceful_shutdown_before:
+          - example-guests.service
   post_tasks:
     - name: Nothing the role added remains
       ansible.builtin.shell: |
@@ -41,6 +82,8 @@
         done
         for u in drbd-graceful-shutdown drbd-graceful-down drbd-graceful-disconnect; do
           if [ -L /etc/systemd/system/$u.service ]; then fail "$u still masked"; fi
+          if [ -e /etc/systemd/system/multi-user.target.wants/$u.service ]; then fail "$u still wanted"; fi
+          if [ -e /etc/systemd/system/$u.service.d/50-drbd-role.conf ]; then fail "$u drop-in left"; fi
         done
         if ls /lib/modules/*/updates/dkms/drbd.ko* 2>/dev/null; then fail "DKMS module left"; fi
       args:

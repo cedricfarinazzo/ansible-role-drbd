@@ -22,7 +22,7 @@ The role will:
 - ✅ Check DKMS shows DRBD installed for the running kernel and the newest kernel, build it where it is not; a failed build prints the end of DKMS's `make.log`
 - ✅ Load DRBD 9 now (an older DRBD module, not in use, is unloaded first) and at boot (`/etc/modules-load.d/drbd.conf`), with your module parameters
 - ✅ Turn off LINBIT's usage reporting (`usage-count no;`) unless you want it
-- ✅ Optionally mask DRBD's graceful shutdown units, for a cluster manager that stops DRBD itself
+- ✅ Optionally wire DRBD's graceful shutdown units from boot, ordered after the services using DRBD, or mask them for a cluster manager that stops DRBD itself
 
 Resource configuration (`/etc/drbd.d/*.res`) is left to you or to a storage manager on top; see the [DRBD 9 User Guide](https://linbit.com/drbd-user-guide/drbd-guide-9_0-en/).
 
@@ -111,9 +111,14 @@ drbd_module_load_at_boot: true  # /etc/modules-load.d/drbd.conf
 drbd_module_options: {}         # e.g. {minor_count: 64}, in /etc/modprobe.d/drbd.conf
 drbd_usage_count: false         # usage-count in /etc/drbd.d/global_common.conf; drbd-utils ships yes
 drbd_mask_graceful_shutdown: false
+drbd_graceful_shutdown: false                       # wire the graceful units from boot
+drbd_graceful_shutdown_wanted_by: multi-user.target # the target that wants them
+drbd_graceful_shutdown_before: []                   # units the graceful down waits for at shutdown
 ```
 
-`drbd_mask_graceful_shutdown: true` masks `drbd-graceful-shutdown.service` (drbd-utils 9.28 to 9.34) or `drbd-graceful-down.service` and `drbd-graceful-disconnect.service` (9.35+), e.g. under Pacemaker, which stops DRBD itself. `false` removes only masks (links to `/dev/null`), never a unit file of yours.
+drbd-utils' udev rule starts its graceful units (`ExecStop` runs `drbdadm down all`) only once a DRBD device appears, whatever brought the resource up (`drbd@.service`, LINSTOR's satellite, a script). `drbd_graceful_shutdown: true` makes `drbd_graceful_shutdown_wanted_by` want each graceful unit the package ships (a link in its `.wants/`: they have no `[Install]` section) and starts them now, so every shutdown takes the resources down cleanly. `drbd_graceful_shutdown_before` (e.g. the service that stops your VMs, a mount on a DRBD device) goes into a `Before=` drop-in on the down unit: at shutdown it runs once those have stopped. `drbdadm down all` reads `/etc/drbd.conf`, so resources a tool writes elsewhere must be included from `/etc/drbd.d/` (LINSTOR's satellite package does this). `false` removes the links (in `drbd_graceful_shutdown_wanted_by` only: after changing the target, remove the old link yourself) and the drop-in.
+
+`drbd_mask_graceful_shutdown: true` masks `drbd-graceful-shutdown.service` (drbd-utils 9.28 to 9.34) or `drbd-graceful-down.service` and `drbd-graceful-disconnect.service` (9.35+), e.g. under Pacemaker, which stops DRBD itself; it excludes `drbd_graceful_shutdown`. `false` removes only masks (links to `/dev/null`), never a unit file of yours.
 
 A loaded DRBD 8.4 module still in use (resources up) is never unloaded: the role fails and asks you to stop the resources first.
 
@@ -144,6 +149,14 @@ drbd_install_method: distribution
 drbd_kernel_headers_package: proxmox-default-headers
 ```
 
+### DRBD resources taken down after the VMs at shutdown
+
+```yaml
+drbd_graceful_shutdown: true
+drbd_graceful_shutdown_before:
+  - example-guests.service
+```
+
 ### A cluster under Pacemaker, more DRBD devices
 
 ```yaml
@@ -166,11 +179,11 @@ cat /etc/apt/sources.list.d/linbit.sources
 
 ## ↩️ Rollback
 
-`drbd_state: absent` purges the DRBD packages (their DKMS builds go with them) and removes the source, the keyring, the key cache, the module files and the masks the role made. The headers stay (other DKMS modules may need them); a loaded module stays until the next reboot.
+`drbd_state: absent` purges the DRBD packages (their DKMS builds go with them) and removes the source, the keyring, the key cache, the module files, and the masks, wants links and drop-ins the role made. The headers stay (other DKMS modules may need them); a loaded module stays until the next reboot.
 
 ## 🧪 Testing
 
-Molecule runs in Docker containers, which share the CI host's kernel: the scenarios build DRBD for the headers the distribution ships and never load it. `default` runs the role in check mode on a fresh container, converges, checks the exact source, the keyring's single key and fingerprint, that no other source names LINBIT, no LINBIT key sits in `trusted.gpg.d`, `linbit-keyring` is not installed and nothing is held, then `dkms status`, `modinfo` (9.x, from `updates/dkms`) and the files; it reruns for idempotence, masks the graceful units, then runs `drbd_state: absent` and checks everything is gone. `failure` (Debian 13) runs the role with a wrong fingerprint (it must stop before the source is written), with the headers removed (it must stop on DKMS and show its output), and with a broken kernel Makefile (it must show the end of `make.log`). `tests/validate.test.sh` feeds good and bad inputs to the role's checks.
+Molecule runs in Docker containers, which share the CI host's kernel: the scenarios build DRBD for the headers the distribution ships and never load it. `default` runs the role in check mode on a fresh container, converges, checks the exact source, the keyring's single key and fingerprint, that no other source names LINBIT, no LINBIT key sits in `trusted.gpg.d`, `linbit-keyring` is not installed and nothing is held, then `dkms status`, `modinfo` (9.x, from `updates/dkms`) and the files; the graceful units wanted, active and ordered; it reruns for idempotence, masks the graceful units (no longer wanted), then runs `drbd_state: absent` and checks everything is gone. `failure` (Debian 13) runs the role with a wrong fingerprint (it must stop before the source is written), with the headers removed (it must stop on DKMS and show its output), and with a broken kernel Makefile (it must show the end of `make.log`). `tests/validate.test.sh` feeds good and bad inputs to the role's checks.
 
 ```bash
 # One distribution

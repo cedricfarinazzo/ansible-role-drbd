@@ -48,6 +48,12 @@ drbd_graceful_units:
   - drbd-graceful-shutdown.service
   - drbd-graceful-down.service
   - drbd-graceful-disconnect.service
+# The ones whose ExecStop takes every resource down: drbd_graceful_shutdown_before orders them
+drbd_graceful_down_units:
+  - drbd-graceful-shutdown.service
+  - drbd-graceful-down.service
+drbd_unit_dir: /usr/lib/systemd/system
+drbd_graceful_dropin: 50-drbd-role.conf
 
 # Debian 6.12.116+deb13-amd64, 6.1.0-28-cloud-amd64; Ubuntu 6.8.0-45-generic: the flavor is the last group
 drbd_kernel_release_re: '^[0-9]+[.][0-9]+([.][0-9]+)?([+]deb[0-9]+)?(-[0-9]+)?-([a-z0-9-]+)$'
