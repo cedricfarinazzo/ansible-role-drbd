@@ -1,0 +1,34 @@
+---
+# drbd-dkms's prerm removes the DKMS builds. A loaded module stays until reboot; the headers stay (shared).
+- name: DRBD packages are purged
+  ansible.builtin.apt:
+    name: "{{ drbd_packages + drbd_packages_extra }}"
+    state: absent
+    purge: true
+
+- name: Files the role wrote are removed
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "{{ drbd_source_file }}"
+    - "{{ drbd_apt_keyring }}"
+    - "{{ drbd_cache_dir }}"
+    - "{{ drbd_modules_load_file }}"
+    - "{{ drbd_modprobe_file }}"
+  notify: Refresh the package lists
+
+- name: Find the graceful units' masks
+  ansible.builtin.stat:
+    path: /etc/systemd/system/{{ item }}
+  loop: "{{ drbd_graceful_units }}"
+  register: drbd_graceful_masks
+
+- name: Masks the role made are removed
+  ansible.builtin.file:
+    path: "{{ item.stat.path }}"
+    state: absent
+  loop: "{{ drbd_graceful_masks.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: item.stat.islnk | default(false) and item.stat.lnk_target == '/dev/null'

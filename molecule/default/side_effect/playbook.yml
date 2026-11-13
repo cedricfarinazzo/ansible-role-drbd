@@ -1,0 +1,48 @@
+---
+# Graceful units masked, then state absent removes everything the role added.
+- name: Mask the graceful units
+  hosts: all
+  roles:
+    - role: ../../../../ansible-role-drbd
+      vars:
+        drbd_mask_graceful_shutdown: true
+  post_tasks:
+    - name: The graceful units the package ships are masked
+      ansible.builtin.shell: |
+        fail() { echo "FAIL: $*"; exit 1; }
+        n=0
+        for u in drbd-graceful-shutdown drbd-graceful-down drbd-graceful-disconnect; do
+          [ -e /lib/systemd/system/$u.service ] || continue
+          n=$((n + 1))
+          [ "$(systemctl is-enabled $u.service 2>&1)" = masked ] || fail "$u not masked"
+        done
+        [ "$n" -gt 0 ] || fail "no graceful unit shipped"
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+- name: Remove DRBD
+  hosts: all
+  roles:
+    - role: ../../../../ansible-role-drbd
+      vars:
+        drbd_state: absent
+  post_tasks:
+    - name: Nothing the role added remains
+      ansible.builtin.shell: |
+        set -o pipefail
+        fail() { echo "FAIL: $*"; exit 1; }
+        for f in /etc/apt/sources.list.d/linbit.sources /etc/apt/keyrings/linbit.gpg /var/cache/drbd \
+          /etc/modules-load.d/drbd.conf /etc/modprobe.d/drbd.conf /var/lib/dkms/drbd; do
+          if [ -e "$f" ]; then fail "$f remains"; fi
+        done
+        for p in drbd-dkms drbd-utils; do
+          if dpkg-query -W -f '${Status}' $p 2>/dev/null | grep -q 'ok installed'; then fail "$p installed"; fi
+        done
+        for u in drbd-graceful-shutdown drbd-graceful-down drbd-graceful-disconnect; do
+          if [ -L /etc/systemd/system/$u.service ]; then fail "$u still masked"; fi
+        done
+        if ls /lib/modules/*/updates/dkms/drbd.ko* 2>/dev/null; then fail "DKMS module left"; fi
+      args:
+        executable: /bin/bash
+      changed_when: false

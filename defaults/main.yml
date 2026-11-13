@@ -1,0 +1,45 @@
+---
+# present: DRBD 9 packages, DKMS build and module; absent: remove what the role added
+drbd_state: present
+
+# linbit: add LINBIT's APT source and key (below); distribution: install from the sources already configured
+drbd_install_method: linbit
+
+# LINBIT source; empty = the default for this distribution (vars/main.yml). drbd_apt_key_fingerprint is
+# checked against the downloaded key before anything trusts it
+drbd_apt_repo_url: ""
+drbd_apt_suite: ""
+drbd_apt_components: []
+drbd_apt_key_url: ""
+drbd_apt_key_fingerprint: ""
+# The key file inside the downloaded .deb (the package itself is never installed); empty = the download is the key
+drbd_apt_key_deb_member: ""
+# Keyring named by Signed-By on the LINBIT source only
+drbd_apt_keyring: /etc/apt/keyrings/linbit.gpg
+
+drbd_packages:
+  - drbd-dkms
+  - drbd-utils
+drbd_packages_extra: []
+
+# Headers metapackage DKMS builds against: auto = the one of the running kernel's flavor
+# (linux-headers-amd64, linux-headers-generic...); "" = install none
+drbd_kernel_headers_package: auto
+
+# Kernels DKMS builds for: auto = the running kernel and the newest kernel, each when its headers are present
+drbd_dkms_kernels: auto
+
+# Load the module now (an older loaded drbd, not in use, is unloaded first), and at each boot
+drbd_module_load: true
+drbd_module_load_at_boot: true
+# Module parameters, e.g. {minor_count: 64}; written to /etc/modprobe.d/drbd.conf
+drbd_module_options: {}
+
+# usage-count in global_common.conf: false = "no" (drbd-utils ships "yes", which reports to LINBIT)
+drbd_usage_count: false
+
+# true masks the graceful shutdown units (drbd_graceful_units), e.g. when a cluster manager stops DRBD itself
+drbd_mask_graceful_shutdown: false
+
+# Lines of the DKMS make.log printed when a build fails
+drbd_dkms_log_lines: 40

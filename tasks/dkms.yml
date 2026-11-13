@@ -1,0 +1,77 @@
+---
+# Reads only, also in check mode; a build runs only for a kernel DKMS does not show as installed.
+- name: Find the DRBD DKMS version
+  ansible.builtin.shell: |
+    set -o pipefail
+    dpkg-query -L drbd-dkms | sed -n 's|^/usr/src/drbd-\([^/]*\)$|\1|p' | head -1
+  args:
+    executable: /bin/bash
+  register: drbd_dkms_version_read
+  changed_when: false
+  check_mode: false
+  failed_when: false
+
+- name: Find the kernels with headers
+  ansible.builtin.shell: |
+    set -o pipefail
+    for b in /lib/modules/*/build; do if [ -e "$b/Makefile" ]; then basename "$(dirname "$b")"; fi; done | sort -V
+  args:
+    executable: /bin/bash
+  register: drbd_kernels_with_headers
+  changed_when: false
+  check_mode: false
+
+- name: Read the DKMS status
+  ansible.builtin.command: dkms status -m drbd/{{ drbd_dkms_version }}
+  register: drbd_dkms_status
+  changed_when: false
+  check_mode: false
+  failed_when: false
+  when: drbd_dkms_version | length > 0
+
+- name: Build and install DRBD for each kernel
+  when: not (ansible_check_mode and drbd_dkms_version | length == 0)
+  block:
+    - name: The DRBD DKMS source and the target kernels are known
+      ansible.builtin.assert:
+        that:
+          - drbd_dkms_version | length > 0
+          - drbd_dkms_targets | length > 0
+        fail_msg: >-
+          {{ 'drbd-dkms ships no /usr/src/drbd-<version>' if drbd_dkms_version | length == 0 else
+          'No kernel to build for: no headers under /lib/modules/*/build (drbd_kernel_headers_package), or set
+          drbd_dkms_kernels' }}
+        quiet: true
+
+    - name: DKMS builds DRBD
+      ansible.builtin.command: dkms install drbd/{{ drbd_dkms_version }} -k {{ item }}
+      loop: "{{ drbd_dkms_targets | reject('in', drbd_dkms_installed) | list }}"
+      register: drbd_dkms_install
+      changed_when: true
+
+  rescue:
+    - name: Read the end of the DKMS build log
+      ansible.builtin.command: tail -n {{ drbd_dkms_log_lines | int }} /var/lib/dkms/drbd/{{ drbd_dkms_version }}/build/make.log
+      register: drbd_make_log
+      changed_when: false
+      check_mode: false
+      failed_when: false
+
+    - name: Stop on the DKMS failure
+      ansible.builtin.fail:
+        msg: |-
+          DRBD {{ drbd_dkms_version or '?' }} DKMS build failed: {{ drbd_dkms_failed | map(attribute='item') | join(', ')
+          or ansible_failed_result.msg | default('') }}
+          {% if drbd_make_log.rc | default(1) == 0 %}
+          make.log, last {{ drbd_dkms_log_lines }} lines:
+          {{ drbd_make_log.stdout }}
+          {% else %}
+          No make.log: dkms stopped before make. dkms said:
+          {% for r in drbd_dkms_failed %}
+          {% for l in (r.stdout_lines | default([]) + r.stderr_lines | default([]))[-(drbd_dkms_log_lines | int):] %}
+          {{ l }}
+          {% endfor %}
+          {% endfor %}
+          {% endif %}
+      vars:
+        drbd_dkms_failed: "{{ ansible_failed_result.results | default([]) | selectattr('failed', 'defined') | selectattr('failed') | list }}"

@@ -1,0 +1,20 @@
+{
+  "name": "ansible-role-drbd",
+  "private": true,
+  "version": "0.0.0-semantic-release",
+  "description": "Ansible role for DRBD 9: kernel module by DKMS from LINBIT's repositories, drbd-utils",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cedricfarinazzo/ansible-role-drbd.git"
+  },
+  "license": "MIT",
+  "author": "Cédric Farinazzo",
+  "packageManager": "bun@1.4.4",
+  "devDependencies": {
+    "@semantic-release/commit-analyzer": "13.0.1",
+    "@semantic-release/github": "12.0.10",
+    "@semantic-release/release-notes-generator": "14.1.1",
+    "conventional-changelog-conventionalcommits": "9.3.1",
+    "semantic-release": "25.0.9"
+  }
+}

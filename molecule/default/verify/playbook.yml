@@ -1,0 +1,82 @@
+---
+# Each check line ends in "|| fail": a shell task's status is its last command's only.
+- name: Verify
+  hosts: all
+  vars:
+    molecule_debian: "{{ ansible_facts['distribution'] == 'Debian' }}"
+    molecule_fpr: "{{ '4E5385546726D13CB649872CFC05A31DB826FE48' if molecule_debian else 'CC1B5A793C04BB3905AD837734893610CEAA9512' }}"
+    molecule_expected: |
+      Types: deb
+      URIs: {{ 'http://packages.linbit.com/public/' if molecule_debian
+        else 'https://ppa.launchpadcontent.net/linbit/linbit-drbd9-stack/ubuntu/' }}
+      Suites: {{ {'bookworm': 'proxmox-8', 'trixie': 'proxmox-9'}[ansible_facts['distribution_release']]
+        if molecule_debian else ansible_facts['distribution_release'] }}
+      Components: {{ 'drbd-9' if molecule_debian else 'main' }}
+      Signed-By: /etc/apt/keyrings/linbit.gpg
+  tasks:
+    - name: Read the LINBIT source
+      ansible.builtin.slurp:
+        src: /etc/apt/sources.list.d/linbit.sources
+      register: molecule_source
+
+    - name: The LINBIT source is the distribution's default, signed by its own keyring
+      ansible.builtin.assert:
+        that:
+          - molecule_source.content | b64decode == molecule_expected
+        fail_msg: "{{ molecule_source.content | b64decode }}"
+
+    - name: Only that source names LINBIT; no LINBIT key in trusted.gpg.d; no keyring package; nothing held
+      ansible.builtin.shell: |
+        set -o pipefail
+        fail() { echo "FAIL: $*"; exit 1; }
+        o=$(grep -rliE linbit /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null | grep -vx /etc/apt/sources.list.d/linbit.sources)
+        [ -z "$o" ] || fail "other LINBIT sources: $o"
+        if ls /etc/apt/trusted.gpg.d/ | grep -qi linbit; then fail "LINBIT key in trusted.gpg.d"; fi
+        if dpkg-query -W -f '${Status}' linbit-keyring 2>/dev/null | grep -q 'ok installed'; then fail linbit-keyring; fi
+        h=$(apt-mark showhold); [ -z "$h" ] || fail "held: $h"
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Read the keyring
+      ansible.builtin.command: gpg --batch --show-keys --with-colons /etc/apt/keyrings/linbit.gpg
+      register: molecule_keyring
+      changed_when: false
+
+    - name: The keyring holds exactly the pinned key
+      ansible.builtin.assert:
+        that:
+          - molecule_keyring.stdout_lines | select('match', '^pub:') | list | length == 1
+          - (molecule_keyring.stdout_lines | select('match', '^fpr:') | first).split(':')[9] == molecule_fpr
+        fail_msg: "{{ molecule_keyring.stdout_lines }}"
+
+    - name: DKMS shows DRBD installed for the newest kernel, modinfo reads 9.x from the DKMS build
+      ansible.builtin.shell: |
+        set -o pipefail
+        fail() { echo "FAIL: $*"; exit 1; }
+        k=$(ls -1 /lib/modules | sort -V | tail -1)
+        dkms status -m drbd -k "$k" | grep -q ': installed' || fail "dkms status for $k: $(dkms status)"
+        # Headers only, no kernel image (Ubuntu 26.04): DKMS skips depmod, which a host with the kernel has run
+        [ -e "/lib/modules/$k/modules.dep" ] || depmod "$k"
+        v=$(modinfo -k "$k" -F version drbd); [[ $v == 9.* ]] || fail "modinfo version $v"
+        p=$(modinfo -k "$k" -n drbd); [[ $p == /lib/modules/$k/updates/dkms/* ]] || fail "modinfo path $p"
+        dpkg-query -W -f '${Status}' {{ molecule_headers }} | grep -q 'ok installed' || fail "{{ molecule_headers }}"
+        echo "$k $v $p"
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Boot load, module options and usage-count are written; graceful units not masked
+      ansible.builtin.shell: |
+        set -o pipefail
+        fail() { echo "FAIL: $*"; exit 1; }
+        grep -qx drbd /etc/modules-load.d/drbd.conf || fail modules-load
+        grep -qx 'options drbd minor_count=64' /etc/modprobe.d/drbd.conf || fail modprobe.d
+        grep -qE '^\s*usage-count no;' /etc/drbd.d/global_common.conf || fail "usage-count no"
+        if grep -qE '^\s*usage-count yes;' /etc/drbd.d/global_common.conf; then fail "usage-count yes"; fi
+        for u in drbd-graceful-shutdown drbd-graceful-down drbd-graceful-disconnect; do
+          if [ -L /etc/systemd/system/$u.service ]; then fail "$u masked"; fi
+        done
+      args:
+        executable: /bin/bash
+      changed_when: false

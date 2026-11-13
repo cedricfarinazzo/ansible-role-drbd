@@ -1,0 +1,27 @@
+---
+# Headers first: drbd-dkms then builds at install. Installed by name, nothing held: kernel updates rebuild by DKMS.
+- name: The headers metapackage is known
+  ansible.builtin.assert:
+    that:
+      - drbd_kernel_headers_package != 'auto' or drbd_kernel_flavor | length > 0
+    fail_msg: >-
+      Cannot tell the headers metapackage from kernel {{ ansible_facts.kernel }}: set drbd_kernel_headers_package
+      (e.g. linux-headers-amd64), or '' to install none
+    quiet: true
+
+- name: Kernel headers are installed
+  ansible.builtin.apt:
+    name: "{{ drbd_headers_package }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  when: drbd_headers_package | length > 0
+
+# Check mode on a fresh host: the LINBIT source is not written, so APT knows no drbd-dkms yet
+- name: DRBD packages are installed
+  ansible.builtin.apt:
+    name: "{{ drbd_packages + drbd_packages_extra }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  ignore_errors: "{{ ansible_check_mode }}"

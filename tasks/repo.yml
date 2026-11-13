@@ -1,0 +1,130 @@
+---
+# The key is trusted only after its fingerprint matches: nothing below the check writes the source or keyring.
+- name: Key tools are installed
+  ansible.builtin.apt:
+    name:
+      - gpg
+      - ca-certificates
+    state: present
+  register: drbd_key_tools
+
+- name: Key cache directory exists
+  ansible.builtin.file:
+    path: "{{ drbd_cache_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  register: drbd_cache
+
+# Once: get_url fetches again a URL that answers no Last-Modified (keyservers), and their bytes vary
+- name: Find a downloaded key
+  ansible.builtin.stat:
+    path: "{{ drbd_key_download }}"
+  register: drbd_key_cached
+
+- name: Download the LINBIT key
+  ansible.builtin.get_url:
+    url: "{{ drbd_key_url }}"
+    dest: "{{ drbd_key_download }}"
+    owner: root
+    group: root
+    mode: "0644"
+  register: drbd_key_get
+  when: not drbd_key_cached.stat.exists and not (ansible_check_mode and drbd_cache is changed)
+
+# Check mode on a fresh host downloads nothing: there is no key to check yet
+- name: Check and install the key
+  when: not (ansible_check_mode and (drbd_key_tools is changed or drbd_cache is changed or drbd_key_get is changed))
+  block:
+    - name: Extract the key from the package (never installed)
+      ansible.builtin.shell: |
+        set -euo pipefail
+        dpkg-deb --fsys-tarfile {{ drbd_key_download | quote }} | tar -xO {{ drbd_key_deb_member | quote }} > {{ drbd_key_file | quote }}.tmp
+        mv {{ drbd_key_file | quote }}.tmp {{ drbd_key_file | quote }}
+      args:
+        executable: /bin/bash
+        creates: "{{ drbd_key_file }}"
+      when: drbd_key_deb_member | length > 0
+
+    - name: Read the downloaded key
+      ansible.builtin.command: gpg --batch --show-keys --with-colons {{ drbd_key_file | quote }}
+      register: drbd_key_show
+      changed_when: false
+      check_mode: false
+      failed_when: false
+
+    - name: The downloaded key is the pinned one
+      ansible.builtin.assert:
+        that:
+          - drbd_key_show.rc == 0
+          - drbd_key_show.stdout_lines | select('match', '^pub:') | list | length == 1
+          - drbd_key_primary_fpr == drbd_key_fingerprint
+        fail_msg: >-
+          {{ drbd_key_url }} holds {{ drbd_key_show.stdout_lines | select('match', '^pub:') | list | length }}
+          key(s), primary fingerprint {{ drbd_key_primary_fpr or 'none' }}, expected {{ drbd_key_fingerprint }}
+          (drbd_apt_key_fingerprint). Nothing was trusted; the download is removed.
+        quiet: true
+      vars:
+        # The first fpr line after pub is the primary key's; later ones are subkeys
+        drbd_key_primary_fpr: >-
+          {{ (drbd_key_show.stdout_lines | select('match', '^fpr:') | first | default('::::::::::')).split(':')[9] }}
+
+    - name: Keyring directory exists
+      ansible.builtin.file:
+        path: "{{ drbd_apt_keyring | dirname }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    # Binary, as checked above (one key); dearmor needs no gpg-agent, unlike --import
+    - name: Write the keyring
+      ansible.builtin.shell: |
+        set -euo pipefail
+        if [ "$(head -c 5 {{ drbd_key_file | quote }})" = "-----" ]; then
+          gpg --batch --yes --dearmor -o {{ drbd_apt_keyring | quote }}.tmp {{ drbd_key_file | quote }}
+        else
+          cp {{ drbd_key_file | quote }} {{ drbd_apt_keyring | quote }}.tmp
+        fi
+        test -s {{ drbd_apt_keyring | quote }}.tmp
+        chmod 0644 {{ drbd_apt_keyring | quote }}.tmp
+        if cmp -s {{ drbd_apt_keyring | quote }}.tmp {{ drbd_apt_keyring | quote }}; then
+          rm {{ drbd_apt_keyring | quote }}.tmp; echo unchanged
+        else
+          mv {{ drbd_apt_keyring | quote }}.tmp {{ drbd_apt_keyring | quote }}
+        fi
+      args:
+        executable: /bin/bash
+      register: drbd_keyring_write
+      changed_when: drbd_keyring_write.stdout != 'unchanged'
+
+    - name: LINBIT source, signed by its key only
+      ansible.builtin.copy:
+        dest: "{{ drbd_source_file }}"
+        content: |
+          Types: deb
+          URIs: {{ drbd_repo_url }}
+          Suites: {{ drbd_repo_suite }}
+          Components: {{ drbd_repo_components | join(' ') }}
+          Signed-By: {{ drbd_apt_keyring }}
+        owner: root
+        group: root
+        mode: "0644"
+      register: drbd_source
+
+  rescue:
+    - name: Remove the rejected download
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop: "{{ [drbd_key_download, drbd_key_file] | unique }}"
+
+    - name: Stop on the key or source failure
+      ansible.builtin.fail:
+        msg: "{{ ansible_failed_result.msg | default('the LINBIT key or source could not be set up') }}"
+
+- name: Refresh the package lists for the new source
+  ansible.builtin.apt:
+    update_cache: true
+  when: drbd_source is changed or drbd_keyring_write is changed

@@ -1,0 +1,89 @@
+---
+# Each case must fail; its rescue records the failure message, which verify checks.
+- name: Converge
+  hosts: all
+  tasks:
+    - name: Read the recorded kernel
+      ansible.builtin.slurp:
+        src: /root/molecule-kernel
+      register: molecule_kernel_file
+
+    - name: A downloaded key with another fingerprint
+      block:
+        - name: Run the role with a wrong pinned fingerprint
+          ansible.builtin.include_role:
+            name: ../../../../ansible-role-drbd
+          vars:
+            drbd_apt_key_fingerprint: "0000000000000000000000000000000000000000"
+            drbd_kernel_headers_package: ""
+      rescue:
+        # Read now: the next cases write the source with the right key
+        - name: Find what the failed run left
+          ansible.builtin.shell: |
+            set -o pipefail
+            ls -d /etc/apt/sources.list.d/linbit.sources /etc/apt/keyrings/linbit.gpg /var/cache/drbd/* 2>/dev/null || true
+          args:
+            executable: /bin/bash
+          register: molecule_key_left
+          changed_when: false
+
+        - name: Record the key failure
+          ansible.builtin.copy:
+            dest: /root/molecule-key-failure
+            content: "{{ ansible_failed_task.name }}\n{{ ansible_failed_result.msg }}\nleft:{{ molecule_key_left.stdout_lines | join(' ') }}\n"
+            mode: "0644"
+
+    - name: Headers removed, the kernel named
+      block:
+        - name: Run the role without headers
+          ansible.builtin.include_role:
+            name: ../../../../ansible-role-drbd
+          vars:
+            drbd_kernel_headers_package: ""
+            drbd_dkms_kernels:
+              - "{{ molecule_kernel_file.content | b64decode | trim }}"
+      rescue:
+        - name: Record the DKMS failure
+          ansible.builtin.copy:
+            dest: /root/molecule-dkms-failure
+            content: "{{ ansible_failed_task.name }}\n{{ ansible_failed_result.msg }}\n"
+            mode: "0644"
+
+    # The headers back, their Makefile broken: make itself fails, so DKMS leaves a make.log
+    - name: Headers present, the build broken
+      vars:
+        molecule_kernel: "{{ molecule_kernel_file.content | b64decode | trim }}"
+      block:
+        - name: Reinstall the headers
+          ansible.builtin.apt:
+            name: linux-headers-{{ molecule_kernel }}
+
+        - name: Drop the build the headers' install hook made
+          ansible.builtin.shell: |
+            set -euo pipefail
+            v=$(ls /usr/src | sed -n 's/^drbd-//p')
+            dkms remove "drbd/$v" -k {{ molecule_kernel }}
+            ! dkms status -m drbd -k {{ molecule_kernel }} | grep -q ': installed'
+          args:
+            executable: /bin/bash
+          changed_when: true
+
+        - name: Break the kernel Makefile
+          ansible.builtin.lineinfile:
+            path: /lib/modules/{{ molecule_kernel }}/build/Makefile
+            line: $(error molecule broken headers)
+            insertbefore: BOF
+
+        - name: Run the role on the broken build
+          ansible.builtin.include_role:
+            name: ../../../../ansible-role-drbd
+          vars:
+            drbd_kernel_headers_package: ""
+            drbd_dkms_kernels:
+              - "{{ molecule_kernel }}"
+      rescue:
+        - name: Record the make failure
+          ansible.builtin.copy:
+            dest: /root/molecule-make-failure
+            content: "{{ ansible_failed_task.name }}\n{{ ansible_failed_result.msg }}\n"
+            mode: "0644"
