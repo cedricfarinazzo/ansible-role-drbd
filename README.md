@@ -24,6 +24,8 @@ The role will:
 - ✅ Turn off LINBIT's usage reporting (`usage-count no;`) unless you want it
 - ✅ Optionally mask DRBD's graceful shutdown units, for a cluster manager that stops DRBD itself
 
+Resource configuration (`/etc/drbd.d/*.res`) is left to you or to a storage manager on top; see the [DRBD 9 User Guide](https://linbit.com/drbd-user-guide/drbd-guide-9_0-en/).
+
 ## 📋 Requirements
 
 | Component | Requirement |
@@ -40,8 +42,8 @@ Each is tested in CI with Molecule: a DKMS build of DRBD 9 against the distribut
 
 | Distribution | Versions | LINBIT source |
 |--------------|----------|---------------|
-| **Debian** | 12, 13 | `packages.linbit.com/public`, suites `proxmox-8` (12) and `proxmox-9` (13), component `drbd-9` |
-| **Ubuntu** | 24.04, 26.04 | LINBIT's Launchpad PPA `linbit/linbit-drbd9-stack` |
+| **Debian** | 12, 13 | [`packages.linbit.com/public`](https://packages.linbit.com/public/), suites `proxmox-8` (12) and `proxmox-9` (13), component `drbd-9` |
+| **Ubuntu** | 24.04, 26.04 | LINBIT's Launchpad PPA [`linbit/linbit-drbd9-stack`](https://launchpad.net/~linbit/+archive/ubuntu/linbit-drbd9-stack) |
 
 #### Platform notes
 
@@ -171,9 +173,16 @@ cat /etc/apt/sources.list.d/linbit.sources
 Molecule runs in Docker containers, which share the CI host's kernel: the scenarios build DRBD for the headers the distribution ships and never load it. `default` runs the role in check mode on a fresh container, converges, checks the exact source, the keyring's single key and fingerprint, that no other source names LINBIT, no LINBIT key sits in `trusted.gpg.d`, `linbit-keyring` is not installed and nothing is held, then `dkms status`, `modinfo` (9.x, from `updates/dkms`) and the files; it reruns for idempotence, masks the graceful units, then runs `drbd_state: absent` and checks everything is gone. `failure` (Debian 13) runs the role with a wrong fingerprint (it must stop before the source is written), with the headers removed (it must stop on DKMS and show its output), and with a broken kernel Makefile (it must show the end of `make.log`). `tests/validate.test.sh` feeds good and bad inputs to the role's checks.
 
 ```bash
-./run-tests.sh debian13               # default scenario
-./run-tests.sh -s failure debian13    # failure paths
-make molecule-test-all                # every distribution, in parallel (logs in .molecule-logs/)
+# One distribution
+./run-tests.sh debian13
+
+# Every supported distribution, in parallel (logs in .molecule-logs/)
+make molecule-test-all
+
+# The failure paths
+./run-tests.sh -s failure debian13
+
+# Lint and input tests
 source .venv/bin/activate && yamllint . && ansible-lint && shellcheck run-tests.sh tests/*.sh && tests/validate.test.sh
 ```
 
@@ -186,12 +195,6 @@ Once CI passes on `main`, [semantic-release](https://github.com/semantic-release
 - ✅ **Ansible Core Modules** (built-in)
 - ✅ **OS packages** `gpg`, `ca-certificates`, the headers metapackage, `drbd-dkms` (pulls `dkms` and a compiler), `drbd-utils`
 - ✅ **Collection** `community.general` (`modprobe`), from `requirements.yml`
-
-## 🔗 Links
-
-- [DRBD 9 User Guide](https://linbit.com/drbd-user-guide/drbd-guide-9_0-en/)
-- [LINBIT public repository](https://packages.linbit.com/public/)
-- [LINBIT DRBD 9 PPA](https://launchpad.net/~linbit/+archive/ubuntu/linbit-drbd9-stack)
 
 ## 👥 Authors & Contributors
 
