@@ -56,6 +56,8 @@
         fail() { echo "FAIL: $*"; exit 1; }
         k=$(ls -1 /lib/modules | sort -V | tail -1)
         dkms status -m drbd -k "$k" | grep -q ': installed' || fail "dkms status for $k: $(dkms status)"
+        # Headers only, no kernel image (Ubuntu 26.04): DKMS skips depmod, which a host with the kernel has run
+        [ -e "/lib/modules/$k/modules.dep" ] || depmod "$k"
         v=$(modinfo -k "$k" -F version drbd); [[ $v == 9.* ]] || fail "modinfo version $v"
         p=$(modinfo -k "$k" -n drbd); [[ $p == /lib/modules/$k/updates/dkms/* ]] || fail "modinfo path $p"
         dpkg-query -W -f '${Status}' {{ molecule_headers }} | grep -q 'ok installed' || fail "{{ molecule_headers }}"

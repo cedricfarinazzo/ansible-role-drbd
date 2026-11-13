@@ -30,7 +30,7 @@ Public Ansible role `cedricfarinazzo.drbd` (Ansible Galaxy): the DRBD 9 kernel m
 - **Tags are bare semver** (`1.2.3`, no `v`, `tagFormat` in `.releaserc.json`). Release notes live in GitHub Releases; no `CHANGELOG.md`, no release commit.
 - **No ruleset or branch protection on `main`:** a ruleset blocks semantic-release. Changes still go through a PR with green CI, by discipline.
 - **Variables:** every user-facing variable starts with `drbd_`, is defined in `defaults/main.yml`, asserted in `tasks/validate.yml` (with a case in `tests/validate.test.sh`) and documented in `README.md` in the same PR. Internal values start with `drbd_` too (ansible-lint `var-naming[no-role-prefix]`).
-- **A key is trusted only after its fingerprint check:** no task before the check writes the source or the keyring; the keyring is exported from a throwaway GnuPG home, so it holds the pinned key only. A key fingerprint in `vars/` is re-read from LINBIT over HTTPS before it changes.
+- **A key is trusted only after its fingerprint check:** no task before the check writes the source or the keyring; the check refuses a download holding more than one key, so the keyring (the download, dearmored if armored) holds the pinned key only. Never `gpg --import` on the host: a fresh GnuPG home needs a gpg-agent, which fails on Ubuntu. A key fingerprint in `vars/` is re-read from LINBIT over HTTPS before it changes.
 - **Nothing held:** packages are installed by name; kernel updates rebuild the module through DKMS.
 - **Examples never copy a real deployment:** README and Molecule values use `example.com` names and made-up hosts.
 - **Every input is asserted before any change.**

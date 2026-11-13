@@ -72,13 +72,15 @@
         group: root
         mode: "0755"
 
-    # Exported from a throwaway home: the keyring holds that one key, binary, whatever the download's format
+    # Binary, as checked above (one key); dearmor needs no gpg-agent, unlike --import
     - name: Write the keyring
       ansible.builtin.shell: |
         set -euo pipefail
-        h=$(mktemp -d); trap 'rm -rf "$h"' EXIT
-        gpg --homedir "$h" --batch --quiet --import {{ drbd_key_file | quote }}
-        gpg --homedir "$h" --batch --export {{ drbd_key_fingerprint | quote }} > {{ drbd_apt_keyring | quote }}.tmp
+        if [ "$(head -c 5 {{ drbd_key_file | quote }})" = "-----" ]; then
+          gpg --batch --yes --dearmor -o {{ drbd_apt_keyring | quote }}.tmp {{ drbd_key_file | quote }}
+        else
+          cp {{ drbd_key_file | quote }} {{ drbd_apt_keyring | quote }}.tmp
+        fi
         test -s {{ drbd_apt_keyring | quote }}.tmp
         chmod 0644 {{ drbd_apt_keyring | quote }}.tmp
         if cmp -s {{ drbd_apt_keyring | quote }}.tmp {{ drbd_apt_keyring | quote }}; then
