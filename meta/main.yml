@@ -26,5 +26,6 @@ galaxy_info:
     - replication
     - linbit
     - system
+    - kernel
 
 dependencies: []

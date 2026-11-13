@@ -40,7 +40,21 @@ Public Ansible role `cedricfarinazzo.drbd` (Ansible Galaxy): the DRBD 9 kernel m
 
 ## Supported platforms
 
-`meta/main.yml` `platforms`, the CI matrix, the `README.md` table, `run-tests.sh` and the `Makefile` list the same set. A new platform needs a LINBIT source with `drbd-dkms` for it in `vars/main.yml` and a green `./run-tests.sh <distro>`.
+`meta/main.yml` `platforms`, the CI matrix, the `README.md` table, `run-tests.sh --help` and the `Makefile` list the same set. End-of-life releases are dropped (a `feat!:` change).
+
+### Adding a platform — checklist
+
+1. Check a `geerlingguy/docker-<distro>-ansible:latest` image exists.
+2. Find a LINBIT source that ships `drbd-dkms` and `drbd-utils` for it (public repository suite or PPA); add it to `drbd_linbit_sources` in `vars/main.yml`, its key fingerprint re-read over HTTPS.
+3. Check its headers metapackage matches the kernel-flavor mapping in `vars/main.yml`.
+4. Add it to the CI matrix, `meta/main.yml`, `README.md`, `run-tests.sh` usage and the `Makefile`.
+5. `./run-tests.sh <distro>` green locally: the DKMS build must pass against its headers.
+
+## How releases work
+
+1. A PR is squash-merged into `main` with a Conventional Commit title.
+2. When `ci.yml` passes on the push to `main`, `release.yml` (`workflow_run`) runs `bunx semantic-release`: tag, GitHub Release with notes, comments on the released PRs.
+3. Ansible Galaxy imports each new tag by itself; nothing in CI pushes to Galaxy.
 
 ## Commands
 
@@ -58,3 +72,16 @@ Public Ansible role `cedricfarinazzo.drbd` (Ansible Galaxy): the DRBD 9 kernel m
 - A Jinja string literal unescapes backslashes again: the kernel regex uses `[.]` and `[+]`, and the flavor is read with `regex_findall`, never a `\4` back-reference.
 - Check mode on a fresh host: no cache dir, no key, no LINBIT source. The key tasks are skipped then and the package install has `ignore_errors` in check mode; Molecule's `check` step proves it.
 - `get_url` with `force: false` still fetches a URL that sends no `Last-Modified` (keyserver.ubuntu.com) and rewrites it when its bytes vary: the key download runs only when the cache file is missing.
+
+## Self Improvement Loop
+
+Keep `CLAUDE.md` and `README.md` accurate, in the same PR as the change. Update when:
+
+- **A variable is added, renamed or removed:** `defaults/main.yml`, `tasks/validate.yml`, `tests/validate.test.sh` and the `README.md` blocks.
+- **A platform is added or dropped:** the checklist above.
+- **A file or task file is added, removed or changes role:** Layout above.
+- **A tool or Action is added:** pinned in its own file; never copy versions into prose.
+- **A trap costs a debugging round:** one Gotchas line: the symptom, the cause, the fix.
+- **A convention is established:** Conventions above.
+
+New fact replaces the old clause; never append a changelog. Prefer small targeted edits over rewrites.
