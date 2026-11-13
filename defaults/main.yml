@@ -38,7 +38,7 @@ drbd_module_options: {}
 # usage-count in global_common.conf: false = "no" (drbd-utils ships "yes", which reports to LINBIT)
 drbd_usage_count: false
 
-# true masks drbd-graceful-shutdown.service, e.g. when a cluster manager stops DRBD itself
+# true masks the graceful shutdown units (drbd_graceful_units), e.g. when a cluster manager stops DRBD itself
 drbd_mask_graceful_shutdown: false
 
 # Lines of the DKMS make.log printed when a build fails
