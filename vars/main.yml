@@ -1,0 +1,66 @@
+---
+# LINBIT's public DRBD 9 sources by distribution. Debian: the Proxmox VE suites, the only public ones with
+# drbd-dkms (bookworm/trixie hold userland only). Ubuntu: LINBIT's Launchpad PPA
+drbd_linbit_sources:
+  Debian:
+    url: http://packages.linbit.com/public/
+    suites:
+      bookworm: proxmox-8
+      trixie: proxmox-9
+    components:
+      - drbd-9
+    key_url: https://packages.linbit.com/public/linbit-keyring.deb
+    key_deb_member: ./etc/apt/trusted.gpg.d/linbit-keyring.gpg
+    key_fingerprint: 4E5385546726D13CB649872CFC05A31DB826FE48
+  Ubuntu:
+    url: https://ppa.launchpadcontent.net/linbit/linbit-drbd9-stack/ubuntu/
+    suites:
+      noble: noble
+      resolute: resolute
+    components:
+      - main
+    key_url: https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xCC1B5A793C04BB3905AD837734893610CEAA9512
+    key_deb_member: ""
+    key_fingerprint: CC1B5A793C04BB3905AD837734893610CEAA9512
+
+drbd_linbit_default: "{{ drbd_linbit_sources[ansible_facts.distribution] | default({}) }}"
+drbd_repo_url: "{{ drbd_apt_repo_url or drbd_linbit_default.url | default('') }}"
+drbd_repo_suite: >-
+  {{ drbd_apt_suite or (drbd_linbit_default.suites | default({}))[ansible_facts.distribution_release] | default('') }}
+drbd_repo_components: "{{ drbd_apt_components or drbd_linbit_default.components | default([]) }}"
+drbd_key_url: "{{ drbd_apt_key_url or drbd_linbit_default.key_url | default('') }}"
+# A custom key URL brings its own member (or none); the default member belongs to the default URL only
+drbd_key_deb_member: >-
+  {{ drbd_apt_key_deb_member if drbd_apt_key_url else drbd_apt_key_deb_member or drbd_linbit_default.key_deb_member | default('') }}
+drbd_key_fingerprint: >-
+  {{ (drbd_apt_key_fingerprint or drbd_linbit_default.key_fingerprint | default('')) | replace(' ', '') | upper }}
+
+drbd_source_file: /etc/apt/sources.list.d/linbit.sources
+drbd_cache_dir: /var/cache/drbd
+# Named by the pinned fingerprint: a new pin downloads again
+drbd_key_download: "{{ drbd_cache_dir }}/{{ drbd_key_fingerprint }}.{{ 'deb' if drbd_key_deb_member else 'key' }}"
+drbd_key_file: "{{ drbd_cache_dir ~ '/' ~ drbd_key_fingerprint ~ '.gpg' if drbd_key_deb_member else drbd_key_download }}"
+drbd_modules_load_file: /etc/modules-load.d/drbd.conf
+drbd_modprobe_file: /etc/modprobe.d/drbd.conf
+drbd_global_conf: /etc/drbd.d/global_common.conf
+# drbd-utils 9.28 to 9.34 ship drbd-graceful-shutdown; 9.35 splits it into down and disconnect
+drbd_graceful_units:
+  - drbd-graceful-shutdown.service
+  - drbd-graceful-down.service
+  - drbd-graceful-disconnect.service
+
+# Debian 6.12.116+deb13-amd64, 6.1.0-28-cloud-amd64; Ubuntu 6.8.0-45-generic: the flavor is the last group
+drbd_kernel_release_re: '^[0-9]+[.][0-9]+([.][0-9]+)?([+]deb[0-9]+)?(-[0-9]+)?-([a-z0-9-]+)$'
+drbd_kernel_flavor: "{{ (ansible_facts.kernel | regex_findall(drbd_kernel_release_re) | first | default(['']))[-1] }}"
+drbd_headers_package: >-
+  {{ 'linux-headers-' ~ drbd_kernel_flavor if drbd_kernel_headers_package == 'auto' else drbd_kernel_headers_package }}
+
+drbd_dkms_version: "{{ drbd_dkms_version_read.stdout | default('') | trim }}"
+drbd_headers_kernels: "{{ drbd_kernels_with_headers.stdout_lines | default([]) }}"
+drbd_dkms_targets: >-
+  {{ (([ansible_facts.kernel] if ansible_facts.kernel in drbd_headers_kernels else []) + drbd_headers_kernels[-1:])
+     | unique if drbd_dkms_kernels == 'auto' else drbd_dkms_kernels }}
+# dkms status: "drbd/9.3.4-1, 6.12.116+deb13-amd64, x86_64: installed"
+drbd_dkms_installed: >-
+  {{ drbd_dkms_status.stdout_lines | default([]) | select('search', ': installed')
+     | map('regex_findall', '^[^,]+, ([^,]+), ') | map('first') | list }}

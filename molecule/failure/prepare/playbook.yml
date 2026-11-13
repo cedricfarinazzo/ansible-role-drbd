@@ -1,0 +1,34 @@
+---
+# The kernel the headers metapackage targets, recorded, then its headers removed.
+- name: Prepare
+  hosts: all
+  tasks:
+    - name: Install the headers metapackage
+      ansible.builtin.apt:
+        name: "{{ molecule_headers }}"
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Find its kernel
+      ansible.builtin.shell: |
+        set -o pipefail
+        ls -1 /lib/modules | sort -V | tail -1
+      args:
+        executable: /bin/bash
+      register: molecule_kernel
+      changed_when: false
+
+    - name: Record the kernel
+      ansible.builtin.copy:
+        dest: /root/molecule-kernel
+        content: "{{ molecule_kernel.stdout }}\n"
+        mode: "0644"
+
+    - name: Remove the headers
+      ansible.builtin.apt:
+        name:
+          - "{{ molecule_headers }}"
+          - linux-headers-{{ molecule_kernel.stdout }}
+        state: absent
+        purge: true
+        autoremove: true

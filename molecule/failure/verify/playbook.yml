@@ -1,0 +1,44 @@
+---
+# Each check line ends in "|| fail": a shell task's status is its last command's only.
+- name: Verify
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: The wrong key stopped the role before the source or the keyring was written
+      ansible.builtin.shell: |
+        set -o pipefail
+        fail() { echo "FAIL: $*"; exit 1; }
+        [ -f /root/molecule-key-failure ] || fail "the role did not fail on the wrong key"
+        grep -q '^Stop on the key or source failure$' /root/molecule-key-failure || fail "$(cat /root/molecule-key-failure)"
+        grep -q 'expected 0000000000000000000000000000000000000000' /root/molecule-key-failure || fail "message"
+        grep -qx 'left:' /root/molecule-key-failure || fail "source, keyring or download left: $(grep '^left:' /root/molecule-key-failure)"
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Without headers the role stopped on the DKMS step and printed dkms's output
+      ansible.builtin.shell: |
+        set -o pipefail
+        fail() { echo "FAIL: $*"; exit 1; }
+        f=/root/molecule-dkms-failure
+        [ -f $f ] || fail "the role did not fail without headers"
+        grep -q '^Stop on the DKMS failure$' $f || fail "$(cat $f)"
+        grep -q "DKMS build failed: $(cat /root/molecule-kernel)" $f || fail "$(cat $f)"
+        grep -qiE 'make.log|headers' $f || fail "no make.log tail nor dkms output: $(cat $f)"
+        if [ -e /etc/modules-load.d/drbd.conf ]; then fail "modules-load written after the failure"; fi
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: On a broken build the role printed the tail of make.log
+      ansible.builtin.shell: |
+        set -o pipefail
+        fail() { echo "FAIL: $*"; exit 1; }
+        f=/root/molecule-make-failure
+        [ -f $f ] || fail "the role did not fail on the broken build"
+        grep -q '^Stop on the DKMS failure$' $f || fail "$(cat $f)"
+        grep -q '^make.log, last 40 lines:$' $f || fail "no make.log tail: $(cat $f)"
+        grep -q 'molecule broken headers' $f || fail "make.log tail misses the make error: $(cat $f)"
+      args:
+        executable: /bin/bash
+      changed_when: false

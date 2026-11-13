@@ -1,0 +1,120 @@
+---
+- name: Module parameters
+  ansible.builtin.copy:
+    dest: "{{ drbd_modprobe_file }}"
+    content: "options drbd {{ drbd_module_options.items() | map('join', '=') | join(' ') }}\n"
+    owner: root
+    group: root
+    mode: "0644"
+  when: drbd_module_options | length > 0
+
+- name: No module parameters
+  ansible.builtin.file:
+    path: "{{ drbd_modprobe_file }}"
+    state: absent
+  when: drbd_module_options | length == 0
+
+- name: Module loaded at boot
+  ansible.builtin.copy:
+    dest: "{{ drbd_modules_load_file }}"
+    content: "drbd\n"
+    owner: root
+    group: root
+    mode: "0644"
+  when: drbd_module_load_at_boot
+
+- name: Module not loaded at boot by the role
+  ansible.builtin.file:
+    path: "{{ drbd_modules_load_file }}"
+    state: absent
+  when: not drbd_module_load_at_boot
+
+- name: Load DRBD 9
+  when: drbd_module_load
+  block:
+    - name: Read the loaded DRBD version
+      ansible.builtin.command: cat /sys/module/drbd/version
+      register: drbd_loaded
+      changed_when: false
+      check_mode: false
+      failed_when: false
+
+    # The distribution kernel's in-tree drbd (8.4) loads first when nothing pinned DRBD 9 yet
+    - name: Unload an older DRBD
+      ansible.builtin.command: modprobe -r drbd
+      when: drbd_loaded.rc == 0 and drbd_loaded.stdout is not match('^9[.]')
+      register: drbd_unload
+      changed_when: true
+
+    - name: Load the module
+      community.general.modprobe:
+        name: drbd
+        state: present
+      when: drbd_loaded.rc != 0 or drbd_loaded.stdout is not match('^9[.]')
+
+    - name: Read the DRBD version now loaded
+      ansible.builtin.command: cat /sys/module/drbd/version
+      register: drbd_loaded_now
+      changed_when: false
+      check_mode: false
+      failed_when: false
+
+    - name: DRBD 9 is loaded
+      ansible.builtin.assert:
+        that:
+          - ansible_check_mode or drbd_loaded_now.stdout is match('^9[.]')
+        fail_msg: >-
+          drbd {{ drbd_loaded_now.stdout or 'none' }} loaded, not 9.x: kernel {{ ansible_facts.kernel }} may have
+          no DKMS build (its headers missing: reboot into a kernel listed by dkms status drbd), or modprobe
+          finds the in-tree module first
+        quiet: true
+  rescue:
+    - name: Stop on the module failure
+      ansible.builtin.fail:
+        msg: >-
+          {{ 'drbd ' ~ drbd_loaded.stdout ~ ' is loaded and in use: stop its resources (drbdadm down all), then run
+          again' if drbd_unload is failed else ansible_failed_result.msg | default('modprobe drbd failed') }}
+
+- name: Find the DRBD global config
+  ansible.builtin.stat:
+    path: "{{ drbd_global_conf }}"
+  register: drbd_global_conf_stat
+
+- name: Usage reporting to LINBIT
+  ansible.builtin.replace:
+    path: "{{ drbd_global_conf }}"
+    regexp: '^(\s*)usage-count\s+\w+;'
+    replace: '\1usage-count {{ "yes" if drbd_usage_count else "no" }};'
+  when: drbd_global_conf_stat.stat.exists
+
+# systemctl mask, as a link: the graceful units have no [Install] section, and a missing unit is no error
+- name: Find the graceful units' masks
+  ansible.builtin.stat:
+    path: /etc/systemd/system/{{ item }}
+  loop: "{{ drbd_graceful_units }}"
+  register: drbd_graceful_masks
+
+- name: Mask the graceful units
+  ansible.builtin.file:
+    src: /dev/null
+    dest: /etc/systemd/system/{{ item }}
+    state: link
+  loop: "{{ drbd_graceful_units }}"
+  register: drbd_graceful_masked
+  when: drbd_mask_graceful_shutdown
+
+# Only a mask the role would have made: never an admin's own unit file
+- name: Unmask the graceful units
+  ansible.builtin.file:
+    path: "{{ item.stat.path }}"
+    state: absent
+  loop: "{{ drbd_graceful_masks.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  register: drbd_graceful_unmasked
+  when: not drbd_mask_graceful_shutdown and item.stat.islnk | default(false) and item.stat.lnk_target == '/dev/null'
+
+- name: Reload systemd for the masks
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+  when: drbd_graceful_masked is changed or drbd_graceful_unmasked is changed
