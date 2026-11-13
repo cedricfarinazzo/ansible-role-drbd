@@ -44,6 +44,7 @@
         for u in drbd-graceful-shutdown drbd-graceful-down drbd-graceful-disconnect; do
           if [ -L /etc/systemd/system/$u.service ]; then fail "$u still masked"; fi
           if [ -e /etc/systemd/system/multi-user.target.wants/$u.service ]; then fail "$u still wanted"; fi
+          if [ -e /etc/systemd/system/$u.service.d/50-drbd-role.conf ]; then fail "$u drop-in left"; fi
         done
         if ls /lib/modules/*/updates/dkms/drbd.ko* 2>/dev/null; then fail "DKMS module left"; fi
       args:
