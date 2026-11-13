@@ -17,6 +17,12 @@
     mode: "0755"
   register: drbd_cache
 
+# Once: get_url fetches again a URL that answers no Last-Modified (keyservers), and their bytes vary
+- name: Find a downloaded key
+  ansible.builtin.stat:
+    path: "{{ drbd_key_download }}"
+  register: drbd_key_cached
+
 - name: Download the LINBIT key
   ansible.builtin.get_url:
     url: "{{ drbd_key_url }}"
@@ -25,7 +31,7 @@
     group: root
     mode: "0644"
   register: drbd_key_get
-  when: not (ansible_check_mode and drbd_cache is changed)
+  when: not drbd_key_cached.stat.exists and not (ansible_check_mode and drbd_cache is changed)
 
 # Check mode on a fresh host downloads nothing: there is no key to check yet
 - name: Check and install the key

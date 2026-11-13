@@ -57,3 +57,4 @@ Public Ansible role `cedricfarinazzo.drbd` (Ansible Galaxy): the DRBD 9 kernel m
 - A shell check in a Molecule verify ends each line in `|| fail`: a shell task's status is its last command's only.
 - A Jinja string literal unescapes backslashes again: the kernel regex uses `[.]` and `[+]`, and the flavor is read with `regex_findall`, never a `\4` back-reference.
 - Check mode on a fresh host: no cache dir, no key, no LINBIT source. The key tasks are skipped then and the package install has `ignore_errors` in check mode; Molecule's `check` step proves it.
+- `get_url` with `force: false` still fetches a URL that sends no `Last-Modified` (keyserver.ubuntu.com) and rewrites it when its bytes vary: the key download runs only when the cache file is missing.
