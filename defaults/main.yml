@@ -40,6 +40,12 @@ drbd_usage_count: false
 
 # true masks the graceful shutdown units (drbd_graceful_units), e.g. when a cluster manager stops DRBD itself
 drbd_mask_graceful_shutdown: false
+# true wants the graceful units from boot (drbd-utils' udev rule otherwise starts them only with the first
+# DRBD device), so DRBD goes down cleanly at shutdown; exclusive with drbd_mask_graceful_shutdown
+drbd_graceful_shutdown: false
+drbd_graceful_shutdown_wanted_by: multi-user.target
+# Units the graceful down waits for at shutdown, e.g. the service that stops the VMs on DRBD devices
+drbd_graceful_shutdown_before: []
 
 # Lines of the DKMS make.log printed when a build fails
 drbd_dkms_log_lines: 40

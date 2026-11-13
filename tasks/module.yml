@@ -114,7 +114,88 @@
   register: drbd_graceful_unmasked
   when: not drbd_mask_graceful_shutdown and item.stat.islnk | default(false) and item.stat.lnk_target == '/dev/null'
 
-- name: Reload systemd for the masks
+- name: Find the graceful units shipped
+  ansible.builtin.stat:
+    path: "{{ drbd_unit_dir }}/{{ item }}"
+  loop: "{{ drbd_graceful_units }}"
+  register: drbd_graceful_shipped
+
+- name: Directory of the target that wants the graceful units
+  ansible.builtin.file:
+    path: /etc/systemd/system/{{ drbd_graceful_shutdown_wanted_by }}.wants
+    state: directory
+    mode: "0755"
+  when: drbd_graceful_shutdown
+
+# systemctl add-wants, as a link: the units have no [Install] section to enable
+- name: Graceful units wanted from boot
+  ansible.builtin.file:
+    src: "{{ item.stat.path }}"
+    dest: /etc/systemd/system/{{ drbd_graceful_shutdown_wanted_by }}.wants/{{ item.item }}
+    state: link
+  loop: "{{ drbd_graceful_shipped.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  register: drbd_graceful_wanted
+  when: drbd_graceful_shutdown and item.stat.exists
+
+- name: Graceful units no longer wanted
+  ansible.builtin.file:
+    path: /etc/systemd/system/{{ drbd_graceful_shutdown_wanted_by }}.wants/{{ item }}
+    state: absent
+  loop: "{{ drbd_graceful_units }}"
+  register: drbd_graceful_unwanted
+  when: not drbd_graceful_shutdown
+
+- name: Drop-in directories of the graceful down units
+  ansible.builtin.file:
+    path: /etc/systemd/system/{{ item.item }}.d
+    state: directory
+    mode: "0755"
+  loop: "{{ drbd_graceful_shipped.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when:
+    - drbd_graceful_shutdown and drbd_graceful_shutdown_before | length > 0
+    - item.stat.exists and item.item in drbd_graceful_down_units
+
+# Before= at start is After= at stop: the down runs once those units have stopped
+- name: Graceful down ordered after the units that use DRBD
+  ansible.builtin.copy:
+    content: |
+      [Unit]
+      Before={{ drbd_graceful_shutdown_before | join(' ') }}
+    dest: /etc/systemd/system/{{ item.item }}.d/{{ drbd_graceful_dropin }}
+    mode: "0644"
+  loop: "{{ drbd_graceful_shipped.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  register: drbd_graceful_ordered
+  when:
+    - drbd_graceful_shutdown and drbd_graceful_shutdown_before | length > 0
+    - item.stat.exists and item.item in drbd_graceful_down_units
+
+- name: No ordering drop-in when none is asked
+  ansible.builtin.file:
+    path: /etc/systemd/system/{{ item }}.d/{{ drbd_graceful_dropin }}
+    state: absent
+  loop: "{{ drbd_graceful_down_units }}"
+  register: drbd_graceful_unordered
+  when: not (drbd_graceful_shutdown and drbd_graceful_shutdown_before | length > 0)
+
+- name: Reload systemd for the graceful units
   ansible.builtin.systemd_service:
     daemon_reload: true
-  when: drbd_graceful_masked is changed or drbd_graceful_unmasked is changed
+  when: >-
+    drbd_graceful_masked is changed or drbd_graceful_unmasked is changed or drbd_graceful_wanted is changed
+    or drbd_graceful_unwanted is changed or drbd_graceful_ordered is changed or drbd_graceful_unordered is changed
+
+# Active now, so this boot's shutdown takes DRBD down too
+- name: Graceful units started
+  ansible.builtin.systemd_service:
+    name: "{{ item.item }}"
+    state: started
+  loop: "{{ drbd_graceful_shipped.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: drbd_graceful_shutdown and item.stat.exists

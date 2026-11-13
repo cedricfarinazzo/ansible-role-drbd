@@ -80,3 +80,21 @@
       args:
         executable: /bin/bash
       changed_when: false
+
+    - name: The graceful units shipped are wanted from boot and active; the down waits for the guests
+      ansible.builtin.shell: |
+        set -o pipefail
+        fail() { echo "FAIL: $*"; exit 1; }
+        n=0
+        for u in drbd-graceful-shutdown drbd-graceful-down drbd-graceful-disconnect; do
+          [ -e /usr/lib/systemd/system/$u.service ] || continue
+          n=$((n + 1))
+          systemctl show -p WantedBy --value $u.service | grep -qw multi-user.target || fail "$u not wanted"
+          systemctl is-active -q $u.service || fail "$u not active"
+          [ $u = drbd-graceful-disconnect ] && continue
+          systemctl show -p Before --value $u.service | grep -qw example-guests.service || fail "$u not before"
+        done
+        [ "$n" -gt 0 ] || fail "no graceful unit shipped"
+      args:
+        executable: /bin/bash
+      changed_when: false

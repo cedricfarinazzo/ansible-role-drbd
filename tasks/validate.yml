@@ -20,13 +20,21 @@
       - drbd_module_options.keys() | map('string') | reject('match', '^[a-z_]+$') | list | length == 0
       - drbd_module_options.values() | map('string') | reject('match', '^[A-Za-z0-9,._-]+$') | list | length == 0
       - drbd_usage_count is boolean
-      - drbd_mask_graceful_shutdown is boolean
+      - drbd_mask_graceful_shutdown is boolean and drbd_graceful_shutdown is boolean
+      - not (drbd_mask_graceful_shutdown and drbd_graceful_shutdown)
+      - drbd_graceful_shutdown_wanted_by is string
+      - drbd_graceful_shutdown_wanted_by is match('^[A-Za-z0-9:_.@-]+[.]target$')
+      - drbd_graceful_shutdown_before is sequence and drbd_graceful_shutdown_before is not string
+      - drbd_graceful_shutdown_before | map('string') | reject('match', '^[A-Za-z0-9:_.@-]+[.][a-z]+$')
+        | list | length == 0
       - drbd_dkms_log_lines | string is match('^[0-9]+$') and drbd_dkms_log_lines | int > 0
     fail_msg: >-
       drbd_state present|absent; drbd_install_method linbit|distribution; drbd_apt_keyring an absolute path;
       drbd_packages non-empty and drbd_packages_extra lists of package names; drbd_kernel_headers_package
       auto, '' or a package name; drbd_dkms_kernels auto or a list of kernel releases; drbd_module_load,
-      drbd_module_load_at_boot, drbd_usage_count and drbd_mask_graceful_shutdown booleans; drbd_module_options
+      drbd_module_load_at_boot, drbd_usage_count, drbd_mask_graceful_shutdown and drbd_graceful_shutdown booleans,
+      not both true; drbd_graceful_shutdown_wanted_by a target; drbd_graceful_shutdown_before a list of unit
+      names; drbd_module_options
       a mapping of lower-case names to plain values; drbd_dkms_log_lines above 0
     quiet: true
 

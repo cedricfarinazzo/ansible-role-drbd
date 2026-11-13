@@ -3,3 +3,7 @@
   hosts: all
   roles:
     - role: ../../../../ansible-role-drbd
+      vars:
+        drbd_graceful_shutdown: true
+        drbd_graceful_shutdown_before:
+          - example-guests.service
