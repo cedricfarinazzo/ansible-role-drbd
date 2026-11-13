@@ -11,7 +11,7 @@ show_usage() {
     echo "Run a Molecule scenario of the drbd role (default: the default scenario on debian13)."
     echo "Scenarios: default (LINBIT source, DKMS build, idempotence, then state absent),"
     echo "failure (a wrong key fingerprint, missing kernel headers, a broken kernel Makefile: the role must stop)."
-    echo "Several distributions, or 'all', run in parallel; each writes .molecule-logs/<distro>.log."
+    echo "Several distributions, or 'all', run in parallel; each writes .molecule-logs/<scenario>-<distro>.log."
     echo
     echo "Supported: ${SUPPORTED// /, }"
     echo

@@ -1,5 +1,26 @@
 ---
 # The key is trusted only after its fingerprint matches: nothing below the check writes the source or keyring.
+# APT refuses one URI under two Signed-By values: an existing LINBIT source must go first
+- name: Find other sources of the same repository
+  ansible.builtin.shell: |
+    set -o pipefail
+    grep -rlsF {{ drbd_repo_url | regex_replace('^https?://', '') | quote }} /etc/apt/sources.list /etc/apt/sources.list.d \
+      | grep -vxF {{ drbd_source_file | quote }} || true
+  args:
+    executable: /bin/bash
+  register: drbd_other_sources
+  changed_when: false
+  check_mode: false
+
+- name: No other source names the repository
+  ansible.builtin.assert:
+    that:
+      - drbd_other_sources.stdout_lines | length == 0
+    fail_msg: >-
+      {{ drbd_other_sources.stdout_lines | join(', ') }} already name {{ drbd_repo_url }}: APT would reject the
+      role's source (conflicting Signed-By). Remove that source, or use drbd_install_method distribution.
+    quiet: true
+
 - name: Key tools are installed
   ansible.builtin.apt:
     name:
@@ -59,10 +80,12 @@
         that:
           - drbd_key_show.rc == 0
           - drbd_key_show.stdout_lines | select('match', '^pub:') | list | length == 1
+          - drbd_key_show.stdout_lines | select('match', '^sec:') | list | length == 0
           - drbd_key_primary_fpr == drbd_key_fingerprint
         fail_msg: >-
           {{ drbd_key_url }} holds {{ drbd_key_show.stdout_lines | select('match', '^pub:') | list | length }}
-          key(s), primary fingerprint {{ drbd_key_primary_fpr or 'none' }}, expected {{ drbd_key_fingerprint }}
+          public and {{ drbd_key_show.stdout_lines | select('match', '^sec:') | list | length }} secret key(s),
+          primary fingerprint {{ drbd_key_primary_fpr or 'none' }}, expected {{ drbd_key_fingerprint }}
           (drbd_apt_key_fingerprint). Nothing was trusted; the download is removed.
         quiet: true
       vars:
@@ -118,7 +141,7 @@
       ansible.builtin.file:
         path: "{{ item }}"
         state: absent
-      loop: "{{ [drbd_key_download, drbd_key_file] | unique }}"
+      loop: "{{ [drbd_key_download, drbd_key_file, drbd_key_file ~ '.tmp', drbd_apt_keyring ~ '.tmp'] | unique }}"
 
     - name: Stop on the key or source failure
       ansible.builtin.fail:

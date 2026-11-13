@@ -30,6 +30,7 @@ provisioner:
         drbd_module_load: false
         drbd_module_options:
           minor_count: 64
+          disable_sendpage: true
         molecule_headers: "{{ 'linux-headers-amd64' if ansible_facts['distribution'] == 'Debian' else 'linux-headers-generic' }}"
 verifier:
   name: ansible

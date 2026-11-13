@@ -17,6 +17,95 @@
     cache_valid_time: 3600
   when: drbd_headers_package | length > 0
 
+# The running kernel needs headers to get a build: without, its in-tree DRBD 8.4 is all modprobe would find
+- name: Find the running kernel's headers
+  ansible.builtin.stat:
+    path: /lib/modules/{{ ansible_facts.kernel }}/build/Makefile
+  register: drbd_running_headers
+  when: drbd_module_load and drbd_dkms_kernels == 'auto'
+
+- name: The running kernel can get a DRBD 9 build
+  ansible.builtin.assert:
+    that:
+      - ansible_check_mode or drbd_running_headers.stat.exists
+    fail_msg: >-
+      No headers for the running kernel {{ ansible_facts.kernel }} (/lib/modules/{{ ansible_facts.kernel }}/build):
+      DKMS cannot build DRBD 9 for it. Install linux-headers-{{ ansible_facts.kernel }}, or reboot into the
+      kernel the headers metapackage targets, or set drbd_module_load false
+    quiet: true
+  when: drbd_module_load and drbd_dkms_kernels == 'auto'
+
+# Before drbd-dkms: its postinst and every later autoinstall build read it
+- name: DKMS configuration directory
+  ansible.builtin.file:
+    path: "{{ drbd_dkms_conf | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: not drbd_dkms_spaas
+
+- name: DKMS builds of DRBD without spatch-as-a-service
+  ansible.builtin.copy:
+    dest: "{{ drbd_dkms_conf }}"
+    content: |
+      {{ drbd_marker }}
+      MAKE[0]+=" SPAAS=false"
+    owner: root
+    group: root
+    mode: "0644"
+  when: not drbd_dkms_spaas
+
+- name: Find the DKMS override
+  ansible.builtin.slurp:
+    src: "{{ drbd_dkms_conf }}"
+  register: drbd_dkms_conf_read
+  failed_when: false
+  when: drbd_dkms_spaas
+
+- name: DKMS override removed when spatch-as-a-service is allowed
+  ansible.builtin.file:
+    path: "{{ drbd_dkms_conf }}"
+    state: absent
+  when: drbd_dkms_spaas and (drbd_dkms_conf_read.content | default('') | b64decode).startswith(drbd_marker)
+
+- name: Local spatch for compat patches no cache holds
+  ansible.builtin.apt:
+    name: coccinelle
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  when: drbd_dkms_local_spatch
+
+- name: APT pins of the DRBD packages
+  ansible.builtin.copy:
+    dest: "{{ drbd_apt_pin_file }}"
+    content: |
+      {{ drbd_marker }}
+      {% for p, v in drbd_apt_pins.items() %}
+
+      Package: {{ p }}
+      Pin: version {{ v }}
+      Pin-Priority: 1001
+      {% endfor %}
+    owner: root
+    group: root
+    mode: "0644"
+  when: drbd_apt_pins | length > 0
+
+- name: Find the APT pins file
+  ansible.builtin.slurp:
+    src: "{{ drbd_apt_pin_file }}"
+  register: drbd_apt_pin_read
+  failed_when: false
+  when: drbd_apt_pins | length == 0
+
+- name: No APT pins
+  ansible.builtin.file:
+    path: "{{ drbd_apt_pin_file }}"
+    state: absent
+  when: drbd_apt_pins | length == 0 and (drbd_apt_pin_read.content | default('') | b64decode).startswith(drbd_marker)
+
 # Check mode on a fresh host: the LINBIT source is not written, so APT knows no drbd-dkms yet
 - name: DRBD packages are installed
   ansible.builtin.apt:

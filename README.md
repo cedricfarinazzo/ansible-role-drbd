@@ -1,13 +1,27 @@
 # 💽 Ansible Role: drbd
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Ansible Galaxy](https://img.shields.io/badge/Ansible%20Galaxy-cedricfarinazzo.drbd-blue)](https://galaxy.ansible.com/cedricfarinazzo/drbd)
 
 > **The [DRBD 9](https://linbit.com/drbd/) kernel module built by DKMS from LINBIT's public repositories, with `drbd-utils`, loaded now and at every boot.**
 
 Most distribution kernels ship the DRBD 8.4 module only, while LINSTOR, DRBD Reactor and DRBD 9 resources need DRBD 9. This role adds LINBIT's APT source with a key it checks against a pinned fingerprint first, installs the headers of your kernel flavor, `drbd-dkms` and `drbd-utils`, and makes sure DKMS built DRBD for your kernels. Kernel updates rebuild the module through DKMS, so nothing is held.
 
 ## 🚀 Quick Start
+
+The role is installed from this repository (it is not on Ansible Galaxy):
+
+```yaml
+# requirements.yml
+roles:
+  - name: cedricfarinazzo.drbd
+    src: https://github.com/cedricfarinazzo/ansible-role-drbd.git
+    scm: git
+    version: 2.0.0
+```
+
+```bash
+ansible-galaxy role install -r requirements.yml
+```
 
 ```yaml
 - hosts: storage
@@ -19,8 +33,8 @@ Most distribution kernels ship the DRBD 8.4 module only, while LINSTOR, DRBD Rea
 The role will:
 - ✅ Download LINBIT's key, check it holds exactly one key with the pinned fingerprint, and only then write it to `/etc/apt/keyrings/linbit.gpg` and the source `/etc/apt/sources.list.d/linbit.sources` that names it with `Signed-By` (the key is trusted for that source only; LINBIT's `linbit-keyring` package is never installed)
 - ✅ Install the headers metapackage of the running kernel's flavor (`linux-headers-amd64`, `linux-headers-generic`, ...), then `drbd-dkms` and `drbd-utils`, by name; nothing is held
-- ✅ Check DKMS shows DRBD installed for the running kernel and the newest kernel, build it where it is not; a failed build prints the end of DKMS's `make.log`
-- ✅ Load DRBD 9 now (an older DRBD module, not in use, is unloaded first) and at boot (`/etc/modules-load.d/drbd.conf`), with your module parameters
+- ✅ Check DKMS shows DRBD installed for the running kernel and the newest kernel, build it where it is not; a failed build prints the end of DKMS's `make.log`. Optionally without LINBIT's spatch-as-a-service, for offline or firewalled hosts
+- ✅ Load DRBD 9 now (an older DRBD module, not in use, is unloaded first) and at boot (`/etc/modules-load.d/drbd.conf`), with your module parameters; `modprobe drbd` refuses a module that is not a DKMS build, so a kernel DKMS missed never loads its in-tree DRBD 8.4
 - ✅ Turn off LINBIT's usage reporting (`usage-count no;`) unless you want it
 - ✅ Optionally wire DRBD's graceful shutdown units from boot, ordered after the services using DRBD, or mask them for a cluster manager that stops DRBD itself
 
@@ -34,7 +48,7 @@ Resource configuration (`/etc/drbd.d/*.res`) is left to you or to a storage mana
 | **Ansible** | ansible-core 2.15+ (CI tests the version pinned in `requirements-dev.txt`) |
 | **Collections** | `community.general` (`requirements.yml`) |
 | **Privileges** | Root or sudo access on the target hosts |
-| **Network** | The hosts reach LINBIT's repository (or your mirror) over HTTP(S) |
+| **Network** | The hosts reach LINBIT's repository (or your mirror) over HTTPS; a DKMS build may reach `spaas.drbd.io` (see `drbd_dkms_spaas`) |
 
 ### Supported Distributions
 
@@ -51,6 +65,8 @@ Each is tested in CI with Molecule: a DKMS build of DRBD 9 against the distribut
 - **Secure Boot:** DKMS signs the module with its own key (`/var/lib/dkms/mok.key`); a host with Secure Boot on loads it only once that key is enrolled as a MOK. The role does not enroll it.
 - **Enterprise Linux:** not supported, LINBIT publishes no public RPM repository. ELRepo's `kmod-drbd9x` packages are an option outside this role.
 - **Containers:** a container cannot load a kernel module; set `drbd_module_load: false` there (the Molecule scenario does).
+- **Ubuntu PPA versions:** LINBIT's PPA can carry release candidates (drbd-utils `9.36.0~rc.1` at the time of writing). Pin a release with `drbd_apt_pins` (e.g. `drbd-utils: "9.35.*"`) if you do not want them.
+- **drbd-utils upgrades across 9.35:** 9.34 and older ship `drbd-graceful-shutdown.service`, whose `ExecStop` is `drbdsetup down all`; their `prerm` stops it, so the upgrade to 9.35+ takes every resource on the host down. Upgrade with the resources down (or on a node you can drain), then run the role again: it removes the wants link left to the vanished unit and wires `drbd-graceful-down.service` and `drbd-graceful-disconnect.service`.
 - **Ubuntu HWE kernels:** set `drbd_kernel_headers_package` to the HWE metapackage (`linux-headers-generic-hwe-24.04`), auto picks `linux-headers-generic`.
 
 ## ⚙️ Configuration
@@ -77,9 +93,13 @@ drbd_apt_key_deb_member: ""
 drbd_apt_keyring: /etc/apt/keyrings/linbit.gpg
 ```
 
+The default sources are HTTPS. A source URL you set may be `http://` (a mirror without TLS): APT still checks every package against the pinned key. The key URL must be HTTPS.
+
+Another source already naming the same repository (a `linbit.list` from LINBIT's own instructions, Proxmox VE's) fails the role before it writes anything: APT rejects one repository under two `Signed-By` keys. Remove that source, or use `drbd_install_method: distribution`.
+
 Defaults: Debian downloads `https://packages.linbit.com/public/linbit-keyring.deb`, extracts `./etc/apt/trusted.gpg.d/linbit-keyring.gpg` and checks fingerprint `4E53 8554 6726 D13C B649 872C FC05 A31D B826 FE48`; Ubuntu fetches the PPA key `CC1B 5A79 3C04 BB39 05AD 8377 3489 3610 CEAA 9512` from `keyserver.ubuntu.com`. Pin the fingerprint in your inventory to keep a role update from moving it.
 
-A key whose fingerprint differs, or a download with more than one key, fails the role before the source or the keyring is written, and the download is removed.
+A key whose fingerprint differs, or a download with more than one key or any secret key, fails the role before the source or the keyring is written, and the download is removed.
 
 ### Packages and DKMS
 
@@ -88,6 +108,8 @@ drbd_packages:
   - drbd-dkms
   - drbd-utils
 drbd_packages_extra: []      # e.g. [drbd-reactor]
+# APT pins, package -> version glob, in /etc/apt/preferences.d/drbd.pref (priority 1001); {} = none
+drbd_apt_pins: {}            # e.g. {drbd-utils: "9.35.*"}
 
 # Headers metapackage DKMS builds against: auto = the running kernel's flavor
 # (6.12.116+deb13-amd64 -> linux-headers-amd64, 6.8.0-45-generic -> linux-headers-generic); "" = none
@@ -97,9 +119,18 @@ drbd_kernel_headers_package: auto
 # or a list of kernel releases
 drbd_dkms_kernels: auto
 
+# false: build without LINBIT's spatch-as-a-service
+drbd_dkms_spaas: true
+# Install coccinelle, the local spatch
+drbd_dkms_local_spatch: false
+
 # Lines of make.log printed when a build fails
 drbd_dkms_log_lines: 40
 ```
+
+DRBD's build adapts its sources to each kernel with a compat patch. It takes the patch from the cache the package ships, else from a local `spatch` (coccinelle), else from LINBIT's spatch-as-a-service: the build POSTs the kernel's generated `compat.h` to `https://spaas.drbd.io` and applies the patch it returns, as root, unsigned. That is drbd-dkms's own default (`SPAAS=true` in its Makefile). `drbd_dkms_spaas: false` writes `/etc/dkms/drbd.conf` (`MAKE[0]+=" SPAAS=false"`), read by every DKMS build of DRBD, the role's and the kernel hooks' alike, before `drbd-dkms` is installed. A kernel with no cached patch then needs `drbd_dkms_local_spatch: true` (installs `coccinelle`), or the build fails with DRBD's own message. Use it for offline or firewalled hosts, or when no build may send data out or apply a patch from the network.
+
+When `drbd_module_load` is true and `drbd_dkms_kernels` is auto, the role fails before any build if the running kernel has no headers: DKMS could not build DRBD 9 for it.
 
 A kernel release auto cannot read (no `<version>-<flavor>` form) fails, asking for `drbd_kernel_headers_package`. When DKMS stops before `make` (no headers for a listed kernel), the role prints DKMS's own output instead of `make.log`.
 
@@ -108,19 +139,24 @@ A kernel release auto cannot read (no `<version>-<flavor>` form) fails, asking f
 ```yaml
 drbd_module_load: true          # load DRBD 9 now
 drbd_module_load_at_boot: true  # /etc/modules-load.d/drbd.conf
-drbd_module_options: {}         # e.g. {minor_count: 64}, in /etc/modprobe.d/drbd.conf
+drbd_module_options: {}         # e.g. {minor_count: 64}, in /etc/modprobe.d/drbd.conf; booleans as 1/0
+drbd_module_dkms_only: true     # modprobe drbd loads a DKMS build (updates/) only
 drbd_usage_count: false         # usage-count in /etc/drbd.d/global_common.conf; drbd-utils ships yes
-drbd_mask_graceful_shutdown: false
-drbd_graceful_shutdown: false                       # wire the graceful units from boot
+drbd_mask_graceful_shutdown: null                   # true mask, false unmask, null leave alone
+drbd_graceful_shutdown: null                        # true wire the graceful units from boot, false unwire, null leave alone
 drbd_graceful_shutdown_wanted_by: multi-user.target # the target that wants them
-drbd_graceful_shutdown_before: []                   # units the graceful down waits for at shutdown
+drbd_graceful_shutdown_before: []                   # units every graceful unit waits for at shutdown
 ```
 
-drbd-utils' udev rule starts its graceful units (`ExecStop` runs `drbdadm down all`) only once a DRBD device appears, whatever brought the resource up (`drbd@.service`, LINSTOR's satellite, a script). `drbd_graceful_shutdown: true` makes `drbd_graceful_shutdown_wanted_by` want each graceful unit the package ships (a link in its `.wants/`: they have no `[Install]` section) and starts them now, so every shutdown takes the resources down cleanly. `drbd_graceful_shutdown_before` (e.g. the service that stops your VMs, a mount on a DRBD device) goes into a `Before=` drop-in on the down unit: at shutdown it runs once those have stopped. `drbdadm down all` reads `/etc/drbd.conf`, so resources a tool writes elsewhere must be included from `/etc/drbd.d/` (LINSTOR's satellite package does this). `false` removes the links (in `drbd_graceful_shutdown_wanted_by` only: after changing the target, remove the old link yourself) and the drop-in.
+`/etc/modprobe.d/drbd.conf` starts with the line `# Managed by the Ansible role cedricfarinazzo.drbd`. The role removes it only with that line: a file of yours, without it, is never removed (it is replaced if you ask for options or the DKMS-only rule). With `drbd_module_dkms_only: true` it holds an `install drbd` rule: `modprobe drbd` loads the module only when `modinfo` finds it under `updates/` (where DKMS installs it), else it fails with `refusing the in-tree module`. A kernel DKMS did not build for (its headers missing at its install) then has no DRBD at all rather than DRBD 8.4 under DRBD 9 tools; `dkms status drbd` shows which kernels have a build.
 
-`drbd_mask_graceful_shutdown: true` masks `drbd-graceful-shutdown.service` (drbd-utils 9.28 to 9.34) or `drbd-graceful-down.service` and `drbd-graceful-disconnect.service` (9.35+), e.g. under Pacemaker, which stops DRBD itself; it excludes `drbd_graceful_shutdown`. `false` removes only masks (links to `/dev/null`), never a unit file of yours.
+The role never reloads a loaded DRBD 9: when the loaded version differs from the DKMS build, or the options changed, it prints that a reload (resources down, `modprobe -r drbd; modprobe drbd`) or a reboot applies them.
 
-A loaded DRBD 8.4 module still in use (resources up) is never unloaded: the role fails and asks you to stop the resources first.
+drbd-utils' udev rule starts its graceful units only once a DRBD device appears, whatever brought the resource up (`drbd@.service`, LINSTOR's satellite, a script). Their `ExecStop` acts on every DRBD resource in the kernel: `drbd-graceful-shutdown.service` (drbd-utils 9.28 to 9.34) and `drbd-graceful-down.service` (9.35+) run `drbdsetup down all`, `drbd-graceful-disconnect.service` (9.35+) disconnects every peer; they read no config file, so LINSTOR's resources go down too. `drbd_graceful_shutdown: true` makes `drbd_graceful_shutdown_wanted_by` want each graceful unit the package ships (a link in its `.wants/`: they have no `[Install]` section) and starts them now, so every shutdown takes the resources down cleanly. `drbd_graceful_shutdown_before` (e.g. the service that stops your VMs, a mount on a DRBD device) goes into a `Before=` drop-in on each of them: at shutdown none disconnects nor takes down a resource before those have stopped. `false` removes the links (in `drbd_graceful_shutdown_wanted_by` only: after changing the target, remove the old link yourself) and the drop-in. A wants link whose unit is gone (after a drbd-utils upgrade across 9.35) is removed on every run.
+
+`drbd_mask_graceful_shutdown: true` masks the graceful units, e.g. under Pacemaker, which stops DRBD itself; it excludes `drbd_graceful_shutdown: true`. A mask does not stop a unit already active: its `ExecStop` still runs at this boot's shutdown; reboot, or stop it yourself (which runs it now). `false` removes only masks (links to `/dev/null`), never a unit file of yours. `null`, the default of both, changes neither: masks and links you made by hand stay.
+
+A loaded DRBD 8.4 module still in use (resources up) is never unloaded: the role fails and asks you to stop the resources first (`drbdsetup down all`).
 
 ## 🎯 Usage Examples
 
@@ -157,10 +193,25 @@ drbd_graceful_shutdown_before:
   - example-guests.service
 ```
 
+### An offline or firewalled host
+
+```yaml
+drbd_dkms_spaas: false
+drbd_dkms_local_spatch: true
+```
+
+### Hold back release candidates from the PPA
+
+```yaml
+drbd_apt_pins:
+  drbd-utils: "9.35.*"
+```
+
 ### A cluster under Pacemaker, more DRBD devices
 
 ```yaml
 drbd_mask_graceful_shutdown: true
+drbd_graceful_shutdown: false
 drbd_module_options:
   minor_count: 256
 drbd_packages_extra:
@@ -179,11 +230,11 @@ cat /etc/apt/sources.list.d/linbit.sources
 
 ## ↩️ Rollback
 
-`drbd_state: absent` purges the DRBD packages (their DKMS builds go with them) and removes the source, the keyring, the key cache, the module files, and the masks, wants links and drop-ins the role made. The headers stay (other DKMS modules may need them); a loaded module stays until the next reboot.
+`drbd_state: absent` first checks that no DRBD resource is up (`/sys/block/drbd*`, `drbdsetup status`) and that purging the DRBD packages would remove nothing else (`apt-get -s purge`: `drbd-reactor`, `linstor-satellite` or another package depending on them must be removed first, or listed in `drbd_packages_extra`); either fails before any change. It then purges the DRBD packages (their DKMS builds go with them), removes the files the role wrote (`/etc/modprobe.d/drbd.conf`, `/etc/dkms/drbd.conf` and the APT pins only with the role's first line; `/etc/modules-load.d/drbd.conf`), under `drbd_install_method: linbit` only the source, the keyring and the key cache, then the graceful units' masks, wants links, drop-ins and empty drop-in directories. The headers stay (other DKMS modules may need them); a loaded module stays until the next reboot.
 
 ## 🧪 Testing
 
-Molecule runs in Docker containers, which share the CI host's kernel: the scenarios build DRBD for the headers the distribution ships and never load it. `default` runs the role in check mode on a fresh container, converges, checks the exact source, the keyring's single key and fingerprint, that no other source names LINBIT, no LINBIT key sits in `trusted.gpg.d`, `linbit-keyring` is not installed and nothing is held, then `dkms status`, `modinfo` (9.x, from `updates/dkms`) and the files; the graceful units wanted, active and ordered; it reruns for idempotence, masks the graceful units (no longer wanted), then runs `drbd_state: absent` and checks everything is gone. `failure` (Debian 13) runs the role with a wrong fingerprint (it must stop before the source is written), with the headers removed (it must stop on DKMS and show its output), and with a broken kernel Makefile (it must show the end of `make.log`). `tests/validate.test.sh` feeds good and bad inputs to the role's checks.
+Molecule runs in Docker containers, which share the CI host's kernel: the scenarios build DRBD for the headers the distribution ships and never load it. `default` runs the role in check mode on a fresh container, converges, checks the exact source, the keyring's single key and fingerprint, that no other source names LINBIT, no LINBIT key sits in `trusted.gpg.d`, `linbit-keyring` is not installed and nothing is held, then `dkms status`, `modinfo` (9.x, from `updates/dkms`), the build made with `SPAAS=false` and a local spatch while `spaas.drbd.io` resolves nowhere, the files, the APT pin, `modprobe drbd` refused outside a DKMS build; every graceful unit wanted, active and ordered after the guests; it reruns for idempotence, masks the graceful units (no longer wanted), checks the null defaults leave the masks and an admin's `modprobe.d` file alone, wires the units again and drops a dangling wants link, then runs `drbd_state: absent` with a resource up and with a package depending on drbd-utils (both must stop before the purge), under method `distribution` (the source stays), and finally checks everything is gone. `failure` (Debian 13) runs the role on a key download that also holds a secret key and with a wrong fingerprint (each must stop before the source or the keyring is written), with the headers removed (it must stop on DKMS and show its output), and with a broken kernel Makefile (it must show the end of `make.log`). `tests/validate.test.sh` feeds good and bad inputs to the role's checks.
 
 ```bash
 # One distribution
@@ -201,7 +252,7 @@ source .venv/bin/activate && yamllint . && ansible-lint && shellcheck run-tests.
 
 ## 🚢 Releases
 
-Once CI passes on `main`, [semantic-release](https://github.com/semantic-release/semantic-release) cuts the version from [Conventional Commits](https://www.conventionalcommits.org/): `fix:` releases a patch, `feat:` a minor, a `!` or `BREAKING CHANGE:` footer a major. A squash merge lands the pull request title (checked in CI). Each release gets a bare semver tag (`1.2.3`) and GitHub release notes; Ansible Galaxy imports the new tag from the repository. [Renovate](https://docs.renovatebot.com/) keeps the tooling and the pinned GitHub Actions up to date.
+Once CI passes on `main`, [semantic-release](https://github.com/semantic-release/semantic-release) cuts the version from [Conventional Commits](https://www.conventionalcommits.org/): `fix:` releases a patch, `feat:` a minor, a `!` or `BREAKING CHANGE:` footer a major. A squash merge lands the pull request title (checked in CI). Each release gets a bare semver tag (`1.2.3`) and GitHub release notes; install a tag with `version:` in `requirements.yml` (Quick Start). [Renovate](https://docs.renovatebot.com/) keeps the tooling and the pinned GitHub Actions up to date.
 
 ## 📦 Dependencies
 

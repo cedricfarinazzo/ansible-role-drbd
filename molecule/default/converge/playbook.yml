@@ -7,3 +7,8 @@
         drbd_graceful_shutdown: true
         drbd_graceful_shutdown_before:
           - example-guests.service
+        # Offline build: a kernel with no cached compat patch needs the local spatch
+        drbd_dkms_spaas: false
+        drbd_dkms_local_spatch: true
+        drbd_apt_pins:
+          drbd-utils: "9.*"
