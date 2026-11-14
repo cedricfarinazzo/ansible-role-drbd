@@ -42,5 +42,10 @@
         executable: /bin/bash
       changed_when: false
 
-    - name: The configured files make a mutual TLS handshake between the peers
+    # Every ordered pair: nothing in the config is specific to one peer, so N peers trust each other through the CA
+    - name: The configured files make a mutual TLS handshake between every pair of peers
       ansible.builtin.include_tasks: ../files/handshake.yml
+      loop: "{{ ansible_play_hosts | product(ansible_play_hosts) | list }}"
+      loop_control:
+        loop_var: molecule_pair
+      when: molecule_pair[0] != molecule_pair[1]
