@@ -1,0 +1,26 @@
+---
+# Kernel cases first: they stop before any change, so nothing of DRBD is installed yet when they run.
+# The last two must pass: a truststore holding an intermediate only, a key that is a symlink.
+- name: Converge
+  hosts: all
+  tasks:
+    - name: Each bad input stops the role
+      ansible.builtin.include_tasks: case.yml
+      loop:
+        - {name: kernel-no-handshake, vars: {drbd_tls_kernel_config: /root/kernel-config-no-handshake}}
+        - {name: kernel-no-config, vars: {drbd_tls_kernel_config: /root/no-such-config}}
+        - {name: missing, vars: {drbd_tls_certificate: /etc/ssl/example/missing.pem}}
+        - {name: not-pem, vars: {drbd_tls_certificate: /root/not-pem.pem}}
+        - {name: expired, vars: {drbd_tls_certificate: /root/pki/node-expired.pem}}
+        - {name: expiring, vars: {drbd_tls_cert_min_days: 60}}
+        - {name: other-ca, vars: {drbd_tls_certificate: /root/pki/node-other-ca.pem}}
+        - {name: wrong-truststore, vars: {drbd_tls_truststore: /root/pki/other-ca.pem}}
+        - {name: mismatched-key, vars: {drbd_tls_private_key: /root/pki/stray.key}}
+        - {name: key-mode, vars: {drbd_tls_private_key: /root/key-0644.pem}}
+        - {name: key-owner, vars: {drbd_tls_private_key: /root/key-nobody.pem}}
+        - {name: sibling-intermediate, vars: {drbd_tls_certificate: /root/pki/node-inter2.pem, drbd_tls_truststore: /root/pki/inter.pem}}
+        - {name: intermediate-truststore, vars: {drbd_tls_certificate: /root/pki/node-inter.pem, drbd_tls_truststore: /root/pki/inter.pem}}
+        - {name: symlinked-key, vars: {drbd_tls_private_key: /root/key-link.pem}}
+      loop_control:
+        loop_var: molecule_case
+        label: "{{ molecule_case.name }}"

@@ -158,6 +158,50 @@ drbd-utils' udev rule starts its graceful units only once a DRBD device appears,
 
 A loaded DRBD 8.4 module still in use (resources up) is never unloaded: the role fails and asks you to stop the resources first (`drbdsetup down all`).
 
+### Kernel TLS for replication
+
+```yaml
+drbd_tls: false                  # true: ktls-utils, tlshd on the files below, the tls module
+drbd_tls_packages:               # from the configured sources; pin with drbd_apt_pins
+  - ktls-utils
+drbd_tls_certificate: ""         # PEM certificate, signed by the CA file, for client and server use
+drbd_tls_private_key: ""         # its unencrypted PEM key, owned by root, mode 0600 or 0640
+drbd_tls_truststore: ""          # PEM CA the peers' certificates must chain to
+drbd_tls_cert_min_days: 0        # stop when the certificate expires within this many days
+drbd_tls_config_file: /etc/tlshd-drbd.conf  # tlshd's config, loaded by tlshd -c (a drop-in)
+drbd_tls_loglevel: 0             # tlshd [debug] loglevel
+drbd_tls_kernel_check: true      # stop before any change if the kernel lacks an option below
+drbd_tls_kernel_config: auto     # auto: /boot/config-<running kernel>, then /proc/config.gz
+drbd_tls_kernel_options:
+  - CONFIG_TLS
+  - CONFIG_NET_HANDSHAKE
+```
+
+Kernel TLS is tested in CI on Debian 12 and 13, with LINBIT's ktls-utils 1.5.x (their Debian suites carry it). LINBIT's Ubuntu PPA carries no ktls-utils: on Ubuntu the role installs the distribution's own (older) package, untested, and a `1.5.*` pin matches nothing.
+
+DRBD 9.2.6 and later encrypt a connection with the kernel's TLS when its net section says `tls yes;`. The kernel hands the handshake to `tlshd` (from ktls-utils) through its handshake upcall, and once the keys are agreed the data path stays in the kernel. drbd-utils 9.26 or later is needed to parse the option. With `drbd_tls: true` the role:
+
+- checks before any change that the kernel config sets every `drbd_tls_kernel_options` entry to `y` or `m`;
+- installs `drbd_tls_packages` and `openssl` (LINBIT's Debian suites ship a newer ktls-utils than Debian; pin it with `drbd_apt_pins: {ktls-utils: "1.5.*"}`);
+- refuses to touch tlshd unless the three files exist (a symlink counts as its target), are PEM, the certificate chains to a certificate of the CA file (an intermediate alone is enough, as for tlshd), is valid for `drbd_tls_cert_min_days`, matches the key, and the key is owned by root with mode 0600 or 0640 (0400 and 0440 pass too);
+- writes `drbd_tls_config_file` (mode 0600, with the role's first line), which presents the certificate and trusts the CA on both ends of a handshake, `[authenticate.client]` and `[authenticate.server]`;
+- adds a drop-in, `/etc/systemd/system/tlshd.service.d/50-drbd-role.conf`, so `tlshd -c` reads that file whichever ktls-utils version runs (1.0 reads `/etc/tlshd.conf`, 1.1 and later `/etc/tlshd/config`); the package's own file is left untouched;
+- loads `tls` now (with `drbd_module_load`) and at boot (`/etc/modules-load.d/drbd-tls.conf`);
+- enables tlshd and checks it is still running two seconds after its start.
+
+tlshd reads its config and the files once, at start. The config holds the SHA-256 of the certificate, key and CA, so a renewed certificate changes it and the role restarts tlshd. Nothing else restarts it. Peer authentication is tlshd's (ktls-utils 1.5.0, `server.c` and `client.c`): the connecting side requires a server certificate that chains to its truststore and matches the peer name. The listening side asks for a client certificate and verifies one that is offered, but a client that sends none is not refused by tlshd, so keep DRBD's own peer authentication (`cram-hmac-alg` and `shared-secret`) on as well. tlshd serves every kernel TLS user on the host (NFS, NVMe-TCP as well as DRBD), so set the files to suit them all.
+
+The role never sets DRBD's `tls` option itself. With plain DRBD, add it to the resource and apply it:
+
+```
+resource r0 {
+  net { tls yes; }
+  ...
+}
+```
+
+Run `drbdadm disconnect r0; drbdadm adjust r0` on both nodes: turning TLS on or off is not an online change. With LINSTOR, set `DrbdOptions/Net/tls yes` (`linstor resource-group drbd-options --tls yes <group>`, or per resource definition), then disconnect and adjust each resource the same way. `drbd_tls: false` (the default) removes the role's config, drop-in and module file (only with the role's first line) and restarts a running tlshd on the package's config. ktls-utils stays installed, since another kernel TLS user may need it.
+
 ## 🎯 Usage Examples
 
 ### Pin the source and key in your inventory
@@ -207,6 +251,18 @@ drbd_apt_pins:
   drbd-utils: "9.35.*"
 ```
 
+### Replication over kernel TLS, with LINBIT's ktls-utils
+
+```yaml
+drbd_tls: true
+drbd_tls_certificate: /etc/ssl/drbd/node.example.com.pem
+drbd_tls_private_key: /etc/ssl/drbd/node.example.com.key
+drbd_tls_truststore: /etc/ssl/drbd/ca.pem
+drbd_tls_cert_min_days: 14
+drbd_apt_pins:
+  ktls-utils: "1.5.*"
+```
+
 ### A cluster under Pacemaker, more DRBD devices
 
 ```yaml
@@ -226,15 +282,22 @@ modinfo -F version drbd            # 9.x
 modinfo -n drbd                    # /lib/modules/<release>/updates/dkms/drbd.ko*
 dkms status drbd                   # drbd/<version>, <kernel>, <arch>: installed
 cat /etc/apt/sources.list.d/linbit.sources
+# drbd_tls: true
+systemctl status tlshd             # active, ExecStart ... -c /etc/tlshd-drbd.conf
+journalctl -u tlshd | grep -i handshake   # "Handshake with <peer> (<address>) was successful"
+cat /proc/net/tls_stat             # TlsTxSw/TlsRxSw (or TlsTxDevice/TlsRxDevice) rise with traffic
+drbdsetup show <resource> | grep tls      # tls yes;
 ```
 
 ## ↩️ Rollback
 
-`drbd_state: absent` first checks that no DRBD resource is up (`/sys/block/drbd*`, `drbdsetup status`) and that purging the DRBD packages would remove nothing else (`apt-get -s purge`: `drbd-reactor`, `linstor-satellite` or another package depending on them must be removed first, or listed in `drbd_packages_extra`); either fails before any change. It then purges the DRBD packages (their DKMS builds go with them), removes the files the role wrote (`/etc/modprobe.d/drbd.conf`, `/etc/dkms/drbd.conf` and the APT pins only with the role's first line; `/etc/modules-load.d/drbd.conf`), under `drbd_install_method: linbit` only the source, the keyring and the key cache, then the graceful units' masks, wants links, drop-ins and empty drop-in directories. The headers stay (other DKMS modules may need them); a loaded module stays until the next reboot.
+`drbd_state: absent` first checks that no DRBD resource is up (`/sys/block/drbd*`, `drbdsetup status`) and that purging the DRBD packages would remove nothing else (`apt-get -s purge`: `drbd-reactor`, `linstor-satellite` or another package depending on them must be removed first, or listed in `drbd_packages_extra`); either fails before any change. It then purges the DRBD packages (their DKMS builds go with them), removes the files the role wrote (`/etc/modprobe.d/drbd.conf`, `/etc/dkms/drbd.conf` and the APT pins only with the role's first line; `/etc/modules-load.d/drbd.conf`), under `drbd_install_method: linbit` only the source, the keyring and the key cache, then the graceful units' masks, wants links, drop-ins and empty drop-in directories, and the role's tlshd config, drop-in and `tls` module file. When the role's tlshd config was there, `drbd_tls_packages` are purged with the DRBD packages, under the same purge check. The headers stay (other DKMS modules may need them); a loaded module stays until the next reboot.
 
 ## 🧪 Testing
 
-Molecule runs in Docker containers, which share the CI host's kernel: the scenarios build DRBD for the headers the distribution ships and never load it. `default` runs the role in check mode on a fresh container, converges, checks the exact source, the keyring's single key and fingerprint, that no other source names LINBIT, no LINBIT key sits in `trusted.gpg.d`, `linbit-keyring` is not installed and nothing is held, then `dkms status`, `modinfo` (9.x, from `updates/dkms`), the build made with `SPAAS=false` and a local spatch while `spaas.drbd.io` resolves nowhere, the files, the APT pin, `modprobe drbd` refused outside a DKMS build; every graceful unit wanted, active and ordered after the guests; it reruns for idempotence, masks the graceful units (no longer wanted), checks the null defaults leave the masks and an admin's `modprobe.d` file alone, wires the units again and drops a dangling wants link, then runs `drbd_state: absent` with a resource up and with a package depending on drbd-utils (both must stop before the purge), under method `distribution` (the source stays), and finally checks everything is gone. `failure` (Debian 13) runs the role on a key download that also holds a secret key and with a wrong fingerprint (each must stop before the source or the keyring is written), with the headers removed (it must stop on DKMS and show its output), and with a broken kernel Makefile (it must show the end of `make.log`). `graceful` (Debian 12 only) pins `drbd-utils` to 9.34.x from LINBIT's proxmox-8 suite and checks the single `drbd-graceful-shutdown` unit is wanted from boot, active and ordered after the guests; it then upgrades `drbd-utils` to 9.35 behind the role's back (the old unit goes, its wants link dangles), reruns the role pinned to 9.35 and checks the dangling link and stale drop-in are gone and `drbd-graceful-down` and `drbd-graceful-disconnect` are wanted, active and ordered, then absent leaves nothing. `tests/validate.test.sh` feeds good and bad inputs to the role's checks.
+Molecule runs in Docker containers, which share the CI host's kernel: the scenarios build DRBD for the headers the distribution ships and never load it. `default` runs the role in check mode on a fresh container, converges, checks the exact source, the keyring's single key and fingerprint, that no other source names LINBIT, no LINBIT key sits in `trusted.gpg.d`, `linbit-keyring` is not installed and nothing is held, then `dkms status`, `modinfo` (9.x, from `updates/dkms`), the build made with `SPAAS=false` and a local spatch while `spaas.drbd.io` resolves nowhere, the files, the APT pin, `modprobe drbd` refused outside a DKMS build; every graceful unit wanted, active and ordered after the guests; it reruns for idempotence, masks the graceful units (no longer wanted), checks the null defaults leave the masks and an admin's `modprobe.d` file alone, wires the units again and drops a dangling wants link, then runs `drbd_state: absent` with a resource up and with a package depending on drbd-utils (both must stop before the purge), under method `distribution` (the source stays), and finally checks everything is gone. `failure` (Debian 13) runs the role on a key download that also holds a secret key and with a wrong fingerprint (each must stop before the source or the keyring is written), with the headers removed (it must stop on DKMS and show its output), and with a broken kernel Makefile (it must show the end of `make.log`). `graceful` (Debian 12 only) pins `drbd-utils` to 9.34.x from LINBIT's proxmox-8 suite and checks the single `drbd-graceful-shutdown` unit is wanted from boot, active and ordered after the guests; it then upgrades `drbd-utils` to 9.35 behind the role's back (the old unit goes, its wants link dangles), reruns the role pinned to 9.35 and checks the dangling link and stale drop-in are gone and `drbd-graceful-down` and `drbd-graceful-disconnect` are wanted, active and ordered, then absent leaves nothing. `tls` (Debian 12 and 13) runs two peers with certificates from a throwaway CA and ktls-utils pinned to LINBIT's 1.5.x. It runs check mode on fresh containers, converges, and checks the config (paths in both sections, mode 0600, the files' hashes), the drop-in, that tlshd runs with `-c` on it and is enabled, the `tls` module file, and a GnuTLS handshake between the peers (the library tlshd uses), both ends presenting and verifying a certificate, with exactly those files (gnutls-serv requires the client certificate, which tlshd's server does not: see below). It then reruns for idempotence; checks that a rerun does not restart tlshd while a re-issued certificate does (on that peer only); checks that a client certificate from another CA is refused; checks that `drbd_tls: false` removes the role's files and keeps ktls-utils; and finally checks that absent purges ktls-utils. `tls-failure` (Debian 13) runs the role on a kernel config without `CONFIG_NET_HANDSHAKE` and on a missing kernel config (both must stop before any change), then on a missing certificate, one that is not PEM, one expired, one expiring within `drbd_tls_cert_min_days`, one signed by another CA, a truststore of another CA (and, which must pass, a truststore holding only an intermediate CA, and a key that is a symlink; a certificate of a sibling intermediate against that truststore must fail), a key that does not match, a key with mode 0644 and a key not owned by root: each must stop on its own check with its own message, before tlshd's config is written. `tests/validate.test.sh` feeds good and bad inputs to the role's checks.
+
+Containers cannot prove a real DRBD connection over TLS. The kernel, its `tls` module and the handshake upcall belong to the CI host, and no DRBD module loads in a container. That leaves these checks for the target host: the kernel options of the running kernel; `tls` loading; DRBD's handshake upcall reaching tlshd, which then shows `Handshake with ... was successful` in its journal; tlshd's checks of the peer's name against its certificate (the client side passes the name DRBD gives it to GnuTLS, so the certificate needs a matching SAN); the `/proc/net/tls_stat` counters rising; no plaintext on the wire (`tcpdump` while writing a known string); a peer from another CA, or tlshd stopped, keeping the connection down; and the reconnection after a reboot.
 
 ```bash
 # One distribution
@@ -249,8 +312,12 @@ make molecule-test-all
 # The 9.34 to 9.35 graceful units (Debian 12)
 ./run-tests.sh -s graceful
 
+# Kernel TLS: tlshd on two peers, then its failure paths
+./run-tests.sh -s tls debian13
+./run-tests.sh -s tls-failure debian13
+
 # Lint and input tests
-source .venv/bin/activate && yamllint . && ansible-lint && shellcheck run-tests.sh tests/*.sh && tests/validate.test.sh
+source .venv/bin/activate && yamllint . && ansible-lint && shellcheck run-tests.sh tests/*.sh molecule/tls/files/*.sh && tests/validate.test.sh
 ```
 
 ## 🚢 Releases

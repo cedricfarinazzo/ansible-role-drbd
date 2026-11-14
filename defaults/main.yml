@@ -60,3 +60,29 @@ drbd_graceful_shutdown_before: []
 
 # Lines of the DKMS make.log printed when a build fails
 drbd_dkms_log_lines: 40
+
+# Kernel TLS for DRBD replication (DRBD 9.2.6+, drbd-utils 9.26+): installs ktls-utils, runs tlshd with the
+# certificate, key and CA below, loads the tls module. The role never sets DRBD's net option tls: the
+# resource config (net { tls yes; }) or LINSTOR (DrbdOptions/Net/tls yes) does
+drbd_tls: false
+# From the configured sources; pin a version with drbd_apt_pins (e.g. {ktls-utils: "1.5.*"})
+drbd_tls_packages:
+  - ktls-utils
+# PEM files on the host, presented and trusted by tlshd for both ends of each handshake. The key is owned by
+# root, mode 0600 or 0640; the certificate must chain to the CA file and match the key
+drbd_tls_certificate: ""
+drbd_tls_private_key: ""
+drbd_tls_truststore: ""
+# The certificate must stay valid this many days, or the role stops
+drbd_tls_cert_min_days: 0
+# tlshd's config, written by the role and loaded with tlshd -c (a drop-in), so the package's own file stays
+drbd_tls_config_file: /etc/tlshd-drbd.conf
+# tlshd [debug] loglevel (0 = quiet)
+drbd_tls_loglevel: 0
+# Stop before any change when the kernel config lacks an option below; auto = /boot/config-<running kernel>,
+# then /proc/config.gz
+drbd_tls_kernel_check: true
+drbd_tls_kernel_config: auto
+drbd_tls_kernel_options:
+  - CONFIG_TLS
+  - CONFIG_NET_HANDSHAKE

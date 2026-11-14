@@ -1,0 +1,64 @@
+---
+# A throwaway CA on the first peer, each peer's certificate, key and CA copied to /etc/ssl/example.
+- name: Prepare
+  hosts: all
+  tasks:
+    - name: OpenSSL and the GnuTLS tools (the handshake checks)
+      ansible.builtin.apt:
+        name:
+          - openssl
+          - gnutls-bin
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: A kernel config with TLS and the handshake upcall
+      ansible.builtin.copy:
+        dest: /root/kernel-config
+        content: |
+          CONFIG_KEYS=y
+          CONFIG_TLS=m
+          CONFIG_NET_HANDSHAKE=y
+        mode: "0644"
+
+    - name: Test PKI script  # noqa: no-relative-paths the scenario shares it
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../files/make-pki.sh"
+        dest: /root/make-pki.sh
+        mode: "0755"
+
+    - name: Make the test PKI on the first peer
+      ansible.builtin.command: /root/make-pki.sh /root/pki {{ ansible_play_hosts | join(' ') }}
+      args:
+        creates: /root/pki/ca.pem
+      run_once: true
+      delegate_to: "{{ ansible_play_hosts | first }}"
+
+    - name: Read each peer's files
+      ansible.builtin.slurp:
+        src: /root/pki/{{ item }}
+      loop:
+        - "{{ inventory_hostname }}.pem"
+        - "{{ inventory_hostname }}.key"
+        - ca.pem
+        - "{{ inventory_hostname }}-other-ca.pem"
+        - other-ca.pem
+      delegate_to: "{{ ansible_play_hosts | first }}"
+      register: molecule_pki
+
+    - name: Certificate directory
+      ansible.builtin.file:
+        path: /etc/ssl/example
+        state: directory
+        mode: "0755"
+
+    - name: Certificate, key and CA in place
+      ansible.builtin.copy:
+        dest: "{{ item.0 }}"
+        content: "{{ item.1.content | b64decode }}"
+        owner: root
+        group: root
+        mode: "{{ '0600' if item.0 is search('key') else '0644' }}"
+      loop: "{{ ['/etc/ssl/example/cert.pem', '/etc/ssl/example/key.pem', '/etc/ssl/example/ca.pem',
+               '/root/other-ca-cert.pem', '/root/other-ca.pem'] | zip(molecule_pki.results) | list }}"
+      loop_control:
+        label: "{{ item.0 }}"

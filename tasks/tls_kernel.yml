@@ -1,0 +1,39 @@
+---
+# Read-only, before any change: DRBD's TLS needs the kernel's TLS (tls.ko) and the handshake upcall to tlshd
+- name: Read the kernel config
+  ansible.builtin.shell: |
+    set -o pipefail
+    f={{ drbd_tls_kernel_config_path | quote }}
+    if [ -r "$f" ]; then grep -E '^CONFIG_' "$f" || true
+    {% if drbd_tls_kernel_config == 'auto' %}
+    elif [ -r /proc/config.gz ]; then zcat /proc/config.gz | grep -E '^CONFIG_' || true
+    {% endif %}
+    else echo "no kernel config at $f" >&2; exit 3; fi
+  args:
+    executable: /bin/bash
+  register: drbd_tls_kconfig
+  changed_when: false
+  check_mode: false
+  failed_when: false
+
+- name: The kernel config is readable
+  ansible.builtin.assert:
+    that:
+      - drbd_tls_kconfig.rc == 0
+    fail_msg: >-
+      No kernel config at {{ drbd_tls_kernel_config_path }}{{ ' nor /proc/config.gz' if drbd_tls_kernel_config == 'auto' else '' }}:
+      set drbd_tls_kernel_config to the running kernel's config, or drbd_tls_kernel_check false. Nothing was changed.
+    quiet: true
+
+- name: The kernel has TLS and the handshake upcall
+  ansible.builtin.assert:
+    that:
+      - drbd_tls_kernel_missing | length == 0
+    fail_msg: >-
+      Kernel {{ ansible_facts.kernel }} lacks {{ drbd_tls_kernel_missing | join(', ') }} ({{ drbd_tls_kernel_config_path }}):
+      tlshd cannot serve DRBD handshakes on it. Boot a kernel built with them, or set drbd_tls false. Nothing was changed.
+    quiet: true
+  vars:
+    drbd_tls_kernel_missing: >-
+      {{ drbd_tls_kernel_options | difference(drbd_tls_kconfig.stdout_lines | select('match', '^CONFIG_[A-Z0-9_]+=[ym]$')
+         | map('regex_replace', '=.*$', '') | list) }}

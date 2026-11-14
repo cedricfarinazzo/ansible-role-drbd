@@ -1,0 +1,40 @@
+---
+# Each case stopped on its own check, with its own message, and left no tlshd config of the role; the passing cases
+# (task and message "passed") ran through.
+- name: Verify
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Each case failed where it should, nothing of tlshd written
+      ansible.builtin.shell: |
+        set -o pipefail
+        fail() { echo "FAIL $1: $2"; exit 1; }
+        f=/root/molecule-tls-{{ item.name }}
+        [ -f $f ] || fail {{ item.name }} "not run"
+        r=$(cat $f)
+        [ "$(head -1 $f)" = {{ item.task | quote }} ] || fail {{ item.name }} "stopped elsewhere: $r"
+        grep -qF -- {{ item.msg | quote }} $f || fail {{ item.name }} "message: $r"
+        if grep '^left:' $f | grep -qE 'tlshd'; then fail {{ item.name }} "tlshd files left: $r"; fi
+        {% if item.name is match('kernel') %}
+        if grep '^left:' $f | grep -q linbit; then fail {{ item.name }} "changed the host before the kernel check: $r"; fi
+        {% endif %}
+      args:
+        executable: /bin/bash
+      changed_when: false
+      loop:
+        - {name: kernel-no-handshake, task: "The kernel has TLS and the handshake upcall", msg: "lacks CONFIG_NET_HANDSHAKE"}
+        - {name: kernel-no-config, task: "The kernel config is readable", msg: "No kernel config at /root/no-such-config"}
+        - {name: missing, task: "The certificate, key and CA are files", msg: "/etc/ssl/example/missing.pem: no such file"}
+        - {name: not-pem, task: "The certificate, key and CA fit together", msg: "is not a PEM certificate"}
+        - {name: expired, task: "The certificate, key and CA fit together", msg: "expired or expires within 0 days"}
+        - {name: expiring, task: "The certificate, key and CA fit together", msg: "expires within 60 days"}
+        - {name: other-ca, task: "The certificate, key and CA fit together", msg: "is not signed by /etc/ssl/example/ca.pem"}
+        - {name: wrong-truststore, task: "The certificate, key and CA fit together", msg: "is not signed by /root/pki/other-ca.pem"}
+        - {name: mismatched-key, task: "The certificate, key and CA fit together", msg: "/root/pki/stray.key does not match"}
+        - {name: key-mode, task: "The key is owned by root, mode 0600 or 0640", msg: "mode 0644"}
+        - {name: key-owner, task: "The key is owned by root, mode 0600 or 0640", msg: "is owned by nobody"}
+        - {name: sibling-intermediate, task: "The certificate, key and CA fit together", msg: "is not signed by /root/pki/inter.pem"}
+        - {name: intermediate-truststore, task: "passed", msg: "passed"}
+        - {name: symlinked-key, task: "passed", msg: "passed"}
+      loop_control:
+        label: "{{ item.name }}"

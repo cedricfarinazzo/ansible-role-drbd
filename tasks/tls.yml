@@ -1,0 +1,179 @@
+---
+# tlshd serves the TLS handshakes of DRBD connections set to tls yes. Every file is checked before tlshd is touched
+- name: Kernel TLS packages
+  ansible.builtin.apt:
+    name: "{{ drbd_tls_packages + ['openssl'] }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  register: drbd_tls_installed
+  # A fresh host in check mode may not know the packages yet
+  ignore_errors: "{{ ansible_check_mode }}"
+
+# follow: a symlinked file (certbot's live/) is its target, which tlshd reads
+- name: Find the certificate, key and CA
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: true
+  loop: "{{ drbd_tls_files }}"
+  register: drbd_tls_stat
+
+# Check mode before the files exist (made by an earlier role of the same run): reported, not failed
+- name: Report the certificate, key or CA not written yet
+  ansible.builtin.debug:
+    msg: "Check mode: {{ drbd_tls_absent_files | join(', ') }} missing; a real run stops here unless they exist by then"
+  when: ansible_check_mode and drbd_tls_absent_files | length > 0
+
+- name: Certificate, key and CA in place, tlshd
+  # Check mode on a fresh host: no package (or none known yet), so no tlshd unit to check
+  when: >-
+    not (ansible_check_mode and (drbd_tls_absent_files | length > 0 or drbd_tls_installed is changed
+    or drbd_tls_installed is failed))
+  block:
+    - name: The certificate, key and CA are files
+      ansible.builtin.assert:
+        that:
+          - drbd_tls_absent_files | length == 0
+        fail_msg: "{{ drbd_tls_absent_files | join(', ') }}: no such file. Nothing of tlshd was changed."
+        quiet: true
+
+    - name: The key is owned by root, mode 0600 or 0640
+      ansible.builtin.assert:
+        that:
+          - drbd_tls_key_stat.uid == 0
+          - drbd_tls_key_stat.mode in ['0600', '0640', '0400', '0440']
+        fail_msg: >-
+          {{ drbd_tls_private_key }} is owned by {{ drbd_tls_key_stat.pw_name | default(drbd_tls_key_stat.uid) }}, mode
+          {{ drbd_tls_key_stat.mode }}: chown root and chmod 0600 (or 0640). Nothing of tlshd was changed.
+        quiet: true
+      vars:
+        drbd_tls_key_stat: "{{ drbd_tls_stat.results[1].stat }}"
+
+    # Read-only; the last line is the files' hashes, written into tlshd's config so a new certificate restarts it
+    - name: Check the certificate, key and CA
+      ansible.builtin.shell: |
+        set -uo pipefail
+        c={{ drbd_tls_certificate | quote }}; k={{ drbd_tls_private_key | quote }}; ca={{ drbd_tls_truststore | quote }}
+        openssl x509 -in "$c" -noout 2> /dev/null || { echo "$c is not a PEM certificate"; exit 1; }
+        openssl pkey -in "$k" -noout -passin pass: < /dev/null 2> /dev/null || { echo "$k is not an unencrypted PEM private key"; exit 1; }
+        openssl x509 -in "$ca" -noout 2> /dev/null || { echo "$ca is not a PEM CA certificate"; exit 1; }
+        openssl x509 -in "$c" -noout -checkend {{ drbd_tls_cert_min_days | int * 86400 }} > /dev/null ||
+          { echo "$c expired or expires within {{ drbd_tls_cert_min_days | int }} days ($(openssl x509 -in "$c" -noout -enddate))"; exit 1; }
+        # -partial_chain: any certificate in the truststore anchors (an intermediate too), as in GnuTLS and tlshd
+        openssl verify -partial_chain -CAfile "$ca" "$c" > /dev/null 2>&1 || { echo "$c is not signed by $ca"; exit 1; }
+        [ "$(openssl x509 -noout -pubkey -in "$c")" = "$(openssl pkey -pubout -in "$k" -passin pass: < /dev/null)" ] ||
+          { echo "$k does not match $c"; exit 1; }
+        sha256sum "$c" "$k" "$ca" | awk '{print $1}' | paste -sd' '
+      args:
+        executable: /bin/bash
+      register: drbd_tls_check
+      changed_when: false
+      check_mode: false
+      failed_when: false
+
+    - name: The certificate, key and CA fit together
+      ansible.builtin.assert:
+        that:
+          - drbd_tls_check.rc == 0
+        fail_msg: "{{ drbd_tls_check.stdout_lines[-1] | default(drbd_tls_check.stderr) }}. Nothing of tlshd was changed."
+        quiet: true
+
+    - name: Configuration of tlshd
+      ansible.builtin.copy:
+        dest: "{{ drbd_tls_config_file }}"
+        content: |
+          {{ drbd_marker }}
+          # sha256 of the certificate, key and CA: {{ drbd_tls_check.stdout_lines[-1] }}
+          [debug]
+          loglevel={{ drbd_tls_loglevel | int }}
+          tls=0
+          nl=0
+
+          [authenticate]
+
+          {% for side in ['client', 'server'] %}
+          [authenticate.{{ side }}]
+          x509.truststore={{ drbd_tls_truststore }}
+          x509.certificate={{ drbd_tls_certificate }}
+          x509.private_key={{ drbd_tls_private_key }}
+          {% if not loop.last %}
+
+          {% endif %}
+          {% endfor %}
+        owner: root
+        group: root
+        mode: "0600"
+      register: drbd_tls_config
+
+    - name: Drop-in directory of tlshd
+      ansible.builtin.file:
+        path: "{{ drbd_tls_dropin | dirname }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: The tlshd unit reads the role's configuration
+      ansible.builtin.copy:
+        dest: "{{ drbd_tls_dropin }}"
+        content: |
+          {{ drbd_marker }}
+          [Service]
+          ExecStart=
+          ExecStart={{ drbd_tls_tlshd }} -c {{ drbd_tls_config_file }}
+        owner: root
+        group: root
+        mode: "0644"
+      register: drbd_tls_dropin_written
+
+    - name: The tls module loaded at boot
+      ansible.builtin.copy:
+        dest: "{{ drbd_tls_modules_load_file }}"
+        content: |
+          {{ drbd_marker }}
+          tls
+        owner: root
+        group: root
+        mode: "0644"
+      when: drbd_module_load_at_boot
+
+    - name: The tls module not loaded at boot by the role
+      ansible.builtin.file:
+        path: "{{ drbd_tls_modules_load_file }}"
+        state: absent
+      when: not drbd_module_load_at_boot
+
+    - name: Load the tls module
+      community.general.modprobe:
+        name: tls
+        state: present
+      when: drbd_module_load
+
+    # tlshd reads its configuration and files once, at start
+    - name: The tlshd unit is enabled and running on the current files
+      ansible.builtin.systemd_service:
+        name: tlshd.service
+        enabled: true
+        state: "{{ 'restarted' if drbd_tls_config is changed or drbd_tls_dropin_written is changed else 'started' }}"
+        daemon_reload: "{{ drbd_tls_dropin_written is changed }}"
+
+    # tlshd exits at once on an unreadable config or a kernel without the handshake upcall
+    - name: Find whether tlshd stayed up
+      ansible.builtin.shell: |
+        set -o pipefail
+        sleep 2
+        systemctl is-active tlshd.service || { journalctl -u tlshd.service -n 10 --no-pager; exit 1; }
+      args:
+        executable: /bin/bash
+      register: drbd_tls_up
+      changed_when: false
+      failed_when: false
+      when: not ansible_check_mode
+
+    - name: The tlshd unit is running
+      ansible.builtin.assert:
+        that:
+          - drbd_tls_up.rc == 0
+        fail_msg: "tlshd stopped after its start: {{ drbd_tls_up.stdout_lines | join(' | ') }}"
+        quiet: true
+      when: not ansible_check_mode

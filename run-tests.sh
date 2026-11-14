@@ -11,7 +11,9 @@ show_usage() {
     echo "Run a Molecule scenario of the drbd role (default: the default scenario on debian13)."
     echo "Scenarios: default (LINBIT source, DKMS build, idempotence, then state absent),"
     echo "failure (a wrong key fingerprint, missing kernel headers, a broken kernel Makefile: the role must stop),"
-    echo "graceful (Debian 12 only: drbd-utils pinned to 9.34, then upgraded across the 9.35 unit split)."
+    echo "graceful (Debian 12 only: drbd-utils pinned to 9.34, then upgraded across the 9.35 unit split),"
+    echo "tls (Debian only: two peers, tlshd on a test CA, restart on a new certificate, a wrong CA refused, absent),"
+    echo "tls-failure (Debian 13 only: bad certificate, key or CA, a kernel without the handshake upcall: the role must stop)."
     echo "Several distributions, or 'all', run in parallel; each writes .molecule-logs/<scenario>-<distro>.log."
     echo
     echo "Supported: ${SUPPORTED// /, }"
@@ -22,6 +24,7 @@ show_usage() {
     echo "  $0 all                   # every supported distribution, in parallel"
     echo "  $0 -s failure debian13   # the failure paths"
     echo "  $0 -s graceful           # the 9.34 to 9.35 graceful units (Debian 12)"
+    echo "  $0 -s tls debian13       # kernel TLS: tlshd on two peers"
 }
 
 if [[ ${1:-} == -h || ${1:-} == --help ]]; then show_usage; exit 0; fi
@@ -37,6 +40,10 @@ VENV_PATH=.venv
 distros=("$@")
 # graceful needs LINBIT's proxmox-8 suite, the only public one with drbd-utils 9.34 and 9.35 side by side
 if [[ $SCENARIO == graceful ]]; then SUPPORTED=debian12; fi
+# tls pins LINBIT's ktls-utils, in its Debian suites only
+if [[ $SCENARIO == tls ]]; then SUPPORTED="debian12 debian13"; fi
+# tls-failure's expired certificate needs OpenSSL 3.4+ (x509 -not_after)
+if [[ $SCENARIO == tls-failure ]]; then SUPPORTED=debian13; fi
 default_distro=debian13
 if [[ $SCENARIO == graceful ]]; then default_distro=debian12; fi
 if [[ ${#distros[@]} -eq 0 ]]; then distros=("$default_distro"); fi

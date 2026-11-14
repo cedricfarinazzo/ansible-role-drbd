@@ -2,7 +2,7 @@
 SUPPORTED_DISTROS := debian12 debian13 ubuntu2404 ubuntu2604
 DEFAULT_DISTRO := debian13
 
-.PHONY: molecule-test molecule-test-all molecule-test-failure molecule-test-graceful lint help check-prereqs test
+.PHONY: molecule-test molecule-test-all molecule-test-failure molecule-test-graceful molecule-test-tls molecule-test-tls-failure lint help check-prereqs test
 
 help:
 	@echo "Available targets:"
@@ -12,6 +12,8 @@ help:
 	@echo "  molecule-test-<distro>     - Run molecule tests against specific distribution"
 	@echo "  molecule-test-failure      - Run the failure scenario (wrong key, missing headers, broken build) on $(DEFAULT_DISTRO)"
 	@echo "  molecule-test-graceful     - Run the graceful scenario (drbd-utils 9.34 to 9.35 units) on debian12"
+	@echo "  molecule-test-tls          - Run the tls scenario (tlshd on two peers) on $(DEFAULT_DISTRO)"
+	@echo "  molecule-test-tls-failure  - Run the tls-failure scenario (bad certificate, key, CA, kernel) on $(DEFAULT_DISTRO)"
 	@echo "  lint                       - Run ansible-lint"
 	@echo "  help                       - Show this help message"
 	@echo ""
@@ -42,6 +44,12 @@ molecule-test-failure: check-prereqs
 
 molecule-test-graceful: check-prereqs
 	./run-tests.sh -s graceful debian12
+
+molecule-test-tls: check-prereqs
+	./run-tests.sh -s tls $(DEFAULT_DISTRO)
+
+molecule-test-tls-failure: check-prereqs
+	./run-tests.sh -s tls-failure $(DEFAULT_DISTRO)
 
 # Individual distribution targets
 molecule-test-%: check-prereqs

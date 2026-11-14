@@ -46,6 +46,32 @@
       a mapping of lower-case names to plain values; drbd_dkms_log_lines above 0
     quiet: true
 
+# Paths reach tlshd's config and openssl: absolute, no space nor quote
+- name: Kernel TLS settings are sound
+  ansible.builtin.assert:
+    that:
+      - drbd_tls is boolean and drbd_tls_kernel_check is boolean
+      - drbd_tls_packages is sequence and drbd_tls_packages is not string
+      - drbd_tls_packages | map('string') | reject('match', '^[a-z0-9][a-z0-9.+-]+\Z') | list | length == 0
+      - drbd_tls_config_file is string and drbd_tls_config_file is match('^/[A-Za-z0-9._/-]+\Z')
+      - drbd_tls_kernel_config is string
+      - drbd_tls_kernel_config == 'auto' or drbd_tls_kernel_config is match('^/[A-Za-z0-9._/-]+\Z')
+      - drbd_tls_kernel_options is sequence and drbd_tls_kernel_options is not string
+      - drbd_tls_kernel_options | map('string') | reject('match', '^CONFIG_[A-Z0-9_]+\Z') | list | length == 0
+      - drbd_tls_cert_min_days | string is match('^[0-9]+\Z')
+      - drbd_tls_loglevel | string is match('^[0-9]+\Z')
+      - drbd_tls_certificate is string and drbd_tls_private_key is string and drbd_tls_truststore is string
+      - not drbd_tls or drbd_tls_files | reject('match', '^/[A-Za-z0-9._/-]+\Z') | list | length == 0
+      - not drbd_tls or drbd_tls_files | unique | length == 3
+      - not drbd_tls or drbd_tls_packages | length > 0
+    fail_msg: >-
+      drbd_tls and drbd_tls_kernel_check booleans; drbd_tls_packages a list of package names (not empty with
+      drbd_tls); drbd_tls_config_file an absolute path; drbd_tls_kernel_config auto or an absolute path;
+      drbd_tls_kernel_options a list of CONFIG_ names; drbd_tls_cert_min_days and drbd_tls_loglevel integers
+      from 0; with drbd_tls, drbd_tls_certificate, drbd_tls_private_key and drbd_tls_truststore three distinct
+      absolute paths
+    quiet: true
+
 - name: LINBIT source is complete
   ansible.builtin.assert:
     that:

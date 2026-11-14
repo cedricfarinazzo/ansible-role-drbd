@@ -30,7 +30,7 @@ jobs:
           sys.exit(f'meta/main.yml description: {len(d)} characters, Galaxy accepts 255') if len(d) > 255 else print(len(d), 'characters')
           "
       - run: ansible-lint
-      - run: shellcheck run-tests.sh tests/*.sh
+      - run: shellcheck run-tests.sh tests/*.sh molecule/tls/files/*.sh
       # The input checks: every bad input fails before any change
       - run: tests/validate.test.sh
 
@@ -79,3 +79,34 @@ jobs:
       # drbd-utils 9.34 (drbd-graceful-shutdown) upgraded to 9.35 (down and disconnect), on Debian 12 only
       - name: Run the graceful scenario on debian12
         run: ./run-tests.sh -s graceful debian12
+
+  molecule-tls:
+    runs-on: ubuntu-26.04
+    strategy:
+      fail-fast: false
+      matrix:
+        distro:
+          - debian12
+          - debian13
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.15"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      # tlshd on two peers with a test CA; the handshake upcall is the CI host's kernel
+      - name: Run the tls scenario on ${{ matrix.distro }}
+        run: ./run-tests.sh -s tls ${{ matrix.distro }}
+
+  molecule-tls-failure:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.15"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - name: Run the tls-failure scenario on debian13
+        run: ./run-tests.sh -s tls-failure debian13
