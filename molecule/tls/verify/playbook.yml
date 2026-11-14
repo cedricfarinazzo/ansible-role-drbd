@@ -1,0 +1,46 @@
+---
+# Each check line ends in "|| fail": a shell task's status is its last command's only.
+- name: Verify
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: The role's tlshd config, its drop-in and the tls module at boot
+      ansible.builtin.shell: |
+        set -o pipefail
+        fail() { echo "FAIL: $*"; exit 1; }
+        c=/etc/tlshd-drbd.conf
+        [ "$(stat -c '%U:%G %a' $c)" = "root:root 600" ] || fail "config owner or mode: $(stat -c '%U:%G %a' $c)"
+        head -1 $c | grep -qx '# Managed by the Ansible role cedricfarinazzo.drbd' || fail "no marker"
+        h=$(sha256sum /etc/ssl/example/cert.pem /etc/ssl/example/key.pem /etc/ssl/example/ca.pem | awk '{print $1}' | paste -sd' ')
+        grep -qx "# sha256 of the certificate, key and CA: $h" $c || fail "hash line"
+        grep -qx 'loglevel=1' $c || fail "loglevel"
+        for s in client server; do
+          sed -n "/^\[authenticate.$s\]/,/^\[/p" $c > /tmp/s
+          grep -qx 'x509.truststore=/etc/ssl/example/ca.pem' /tmp/s || fail "$s truststore"
+          grep -qx 'x509.certificate=/etc/ssl/example/cert.pem' /tmp/s || fail "$s certificate"
+          grep -qx 'x509.private_key=/etc/ssl/example/key.pem' /tmp/s || fail "$s key"
+        done
+        grep -qx 'ExecStart=/usr/sbin/tlshd -c /etc/tlshd-drbd.conf' /etc/systemd/system/tlshd.service.d/50-drbd-role.conf || fail "drop-in"
+        grep -qx tls /etc/modules-load.d/drbd-tls.conf || fail "tls not loaded at boot"
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: The tlshd unit runs LINBIT's ktls-utils on the role's config, enabled at boot
+      ansible.builtin.shell: |
+        set -o pipefail
+        fail() { echo "FAIL: $*"; exit 1; }
+        v=$(dpkg-query -W -f='${Version}' ktls-utils)
+        case $v in 1.5.*) ;; *) fail "ktls-utils $v, not the pinned 1.5.*";; esac
+        systemctl is-enabled tlshd.service > /dev/null || fail "tlshd not enabled"
+        systemctl is-active tlshd.service > /dev/null || fail "tlshd not active"
+        pid=$(systemctl show -p MainPID --value tlshd.service)
+        tr '\0' ' ' < /proc/$pid/cmdline | grep -q -- '-c /etc/tlshd-drbd.conf' || fail "tlshd runs $(tr '\0' ' ' < /proc/$pid/cmdline)"
+        j=$(journalctl -u tlshd.service --no-pager)
+        if grep -qiE 'failed to load config|invalid config|handshake service is not available' <<< "$j"; then fail "journal: $j"; fi
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: The configured files make a mutual TLS handshake between the peers
+      ansible.builtin.include_tasks: ../files/handshake.yml

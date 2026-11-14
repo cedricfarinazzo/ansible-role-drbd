@@ -74,3 +74,21 @@ drbd_dkms_installed: >-
 # Booleans as 1/0: "True" is no module parameter value
 drbd_module_options_line: >-
   options drbd {% for k, v in drbd_module_options.items() %}{{ k }}={{ (v | int) if v is boolean else v }}{{ ' ' if not loop.last }}{% endfor %}
+
+# Kernel TLS (drbd_tls): the tls module at boot, tlshd pointed at the role's config by a drop-in
+drbd_tls_modules_load_file: /etc/modules-load.d/drbd-tls.conf
+drbd_tls_dropin: /etc/systemd/system/tlshd.service.d/50-drbd-role.conf
+drbd_tls_files:
+  - "{{ drbd_tls_certificate }}"
+  - "{{ drbd_tls_private_key }}"
+  - "{{ drbd_tls_truststore }}"
+drbd_tls_tlshd: /usr/sbin/tlshd
+drbd_tls_kernel_config_path: >-
+  {{ '/boot/config-' ~ ansible_facts.kernel if drbd_tls_kernel_config == 'auto' else drbd_tls_kernel_config }}
+# The role's tlshd config found: absent then purges the TLS packages too, which the role installed
+drbd_tls_owned: "{{ (drbd_tls_config_read.content | default('') | b64decode).startswith(drbd_marker) }}"
+drbd_purge_packages: "{{ drbd_packages + drbd_packages_extra + (drbd_tls_packages if drbd_tls_owned else []) }}"
+# The certificate, key and CA paths that are no regular file
+drbd_tls_absent_files: >-
+  {{ drbd_tls_stat.results | rejectattr('stat.isreg', 'defined') | map(attribute='item') | list
+     + drbd_tls_stat.results | selectattr('stat.isreg', 'defined') | rejectattr('stat.isreg') | map(attribute='item') | list }}

@@ -21,9 +21,15 @@
       stop what manages them first. Nothing was removed.
     quiet: true
 
+- name: Find the role's tlshd config
+  ansible.builtin.slurp:
+    src: "{{ drbd_tls_config_file }}"
+  register: drbd_tls_config_read
+  failed_when: false
+
 # apt-get -s prints what a purge would take ("Purg <package> [...]"); the apt module reports no such list
 - name: Simulate the purge  # noqa: command-instead-of-module
-  ansible.builtin.command: apt-get -s purge {{ (drbd_packages + drbd_packages_extra) | map('quote') | join(' ') }}
+  ansible.builtin.command: apt-get -s purge {{ drbd_purge_packages | map('quote') | join(' ') }}
   register: drbd_purge_sim
   changed_when: false
   check_mode: false
@@ -35,21 +41,24 @@
     that:
       - drbd_purge_others | length == 0
     fail_msg: >-
-      Purging {{ (drbd_packages + drbd_packages_extra) | join(' ') }} would also remove
+      Purging {{ drbd_purge_packages | join(' ') }} would also remove
       {{ drbd_purge_others | join(' ') }}, which depend on them: remove those first, or list them in
       drbd_packages_extra. Nothing was removed.
     quiet: true
   vars:
     drbd_purge_others: >-
       {{ drbd_purge_sim.stdout_lines | select('match', '^(Purg|Remv) ') | map('split', ' ') | map(attribute=1)
-      | reject('in', drbd_packages + drbd_packages_extra) | list }}
+      | reject('in', drbd_purge_packages) | list }}
 
 # drbd-dkms's prerm removes the DKMS builds. A loaded module stays until reboot; the headers stay (shared).
 - name: DRBD packages are purged
   ansible.builtin.apt:
-    name: "{{ drbd_packages + drbd_packages_extra }}"
+    name: "{{ drbd_purge_packages }}"
     state: absent
     purge: true
+
+- name: The role's tlshd files
+  ansible.builtin.include_tasks: tls_off.yml
 
 - name: Find the files the role writes with its marker
   ansible.builtin.slurp:

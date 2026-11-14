@@ -5,6 +5,10 @@
 - name: DRBD 9
   when: drbd_state == 'present'
   block:
+    - name: Kernel TLS support
+      ansible.builtin.include_tasks: tls_kernel.yml
+      when: drbd_tls and drbd_tls_kernel_check
+
     - name: LINBIT source and key
       ansible.builtin.include_tasks: repo.yml
       when: drbd_install_method == 'linbit'
@@ -17,6 +21,14 @@
 
     - name: Module and settings
       ansible.builtin.include_tasks: module.yml
+
+    - name: Kernel TLS
+      ansible.builtin.include_tasks: tls.yml
+      when: drbd_tls
+
+    - name: No kernel TLS by the role
+      ansible.builtin.include_tasks: tls_off.yml
+      when: not drbd_tls
 
 - name: Remove DRBD
   ansible.builtin.include_tasks: absent.yml

@@ -1,0 +1,40 @@
+---
+# One case: the role must fail; the rescue records the failed task, its message and what the run left.
+- name: One bad input, case {{ molecule_case.name }}
+  block:
+    # Each case alone: a config an earlier case wrongly left would hide this one's own
+    - name: No tlshd file of the role before the case
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/tlshd-drbd.conf
+        - /etc/systemd/system/tlshd.service.d
+
+    - name: Run the role on the case {{ molecule_case.name }}
+      ansible.builtin.include_role:
+        name: ../../../../ansible-role-drbd
+      vars:
+        drbd_tls_kernel_config: "{{ molecule_case.vars.drbd_tls_kernel_config | default('/root/kernel-config') }}"
+        drbd_tls_certificate: "{{ molecule_case.vars.drbd_tls_certificate | default('/etc/ssl/example/cert.pem') }}"
+        drbd_tls_private_key: "{{ molecule_case.vars.drbd_tls_private_key | default('/etc/ssl/example/key.pem') }}"
+        drbd_tls_truststore: "{{ molecule_case.vars.drbd_tls_truststore | default('/etc/ssl/example/ca.pem') }}"
+        drbd_tls_cert_min_days: "{{ molecule_case.vars.drbd_tls_cert_min_days | default(0) }}"
+
+    - name: Record that the role passed on the case {{ molecule_case.name }}
+      ansible.builtin.copy:
+        dest: /root/molecule-tls-{{ molecule_case.name }}
+        content: "passed\n"
+        mode: "0644"
+  rescue:
+    - name: Find what the failed run left
+      ansible.builtin.shell: |
+        ls -d /etc/tlshd-drbd.conf /etc/systemd/system/tlshd.service.d /etc/apt/sources.list.d/linbit.sources 2> /dev/null || true
+      register: molecule_left
+      changed_when: false
+
+    - name: Record the failure of the case {{ molecule_case.name }}
+      ansible.builtin.copy:
+        dest: /root/molecule-tls-{{ molecule_case.name }}
+        content: "{{ ansible_failed_task.name }}\n{{ ansible_failed_result.msg }}\nleft:{{ molecule_left.stdout_lines | join(' ') }}\n"
+        mode: "0644"

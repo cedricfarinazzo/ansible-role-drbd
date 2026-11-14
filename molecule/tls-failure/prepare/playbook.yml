@@ -1,0 +1,37 @@
+---
+# A test PKI with a good certificate, and the bad inputs each case points the role at.
+- name: Prepare
+  hosts: all
+  tasks:
+    - name: OpenSSL
+      ansible.builtin.apt:
+        name: openssl
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Test PKI script  # noqa: no-relative-paths the scenario shares it
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../tls/files/make-pki.sh"
+        dest: /root/make-pki.sh
+        mode: "0755"
+
+    - name: Make the test PKI
+      ansible.builtin.command: /root/make-pki.sh /root/pki node
+      args:
+        creates: /root/pki/ca.pem
+
+    - name: Bad inputs and kernel configs
+      ansible.builtin.shell: |
+        set -euo pipefail
+        mkdir -p /etc/ssl/example
+        install -m 0644 /root/pki/node.pem /etc/ssl/example/cert.pem
+        install -m 0600 /root/pki/node.key /etc/ssl/example/key.pem
+        install -m 0644 /root/pki/ca.pem /etc/ssl/example/ca.pem
+        echo 'not a certificate' > /root/not-pem.pem
+        install -m 0644 /root/pki/node.key /root/key-0644.pem
+        install -m 0600 -o nobody /root/pki/node.key /root/key-nobody.pem
+        printf 'CONFIG_KEYS=y\nCONFIG_TLS=m\nCONFIG_NET_HANDSHAKE=y\n' > /root/kernel-config
+        printf 'CONFIG_KEYS=y\nCONFIG_TLS=m\n# CONFIG_NET_HANDSHAKE is not set\n' > /root/kernel-config-no-handshake
+      args:
+        executable: /bin/bash
+        creates: /root/kernel-config

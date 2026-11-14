@@ -1,0 +1,71 @@
+---
+dependency:
+  name: galaxy
+driver:
+  name: docker
+# Two peers on one network, each with its own certificate from a throwaway CA
+platforms:
+  - name: tls-a-${MOLECULE_DISTRO:-debian13}
+    hostname: tls-a-${MOLECULE_DISTRO:-debian13}
+    image: "geerlingguy/docker-${MOLECULE_DISTRO:-debian13}-ansible:latest"
+    command: ${MOLECULE_DOCKER_COMMAND:-""}
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    cgroupns_mode: host
+    privileged: true
+    pre_build_image: true
+    networks:
+      - name: drbd-tls-${MOLECULE_DISTRO:-debian13}
+  - name: tls-b-${MOLECULE_DISTRO:-debian13}
+    hostname: tls-b-${MOLECULE_DISTRO:-debian13}
+    image: "geerlingguy/docker-${MOLECULE_DISTRO:-debian13}-ansible:latest"
+    command: ${MOLECULE_DOCKER_COMMAND:-""}
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    cgroupns_mode: host
+    privileged: true
+    pre_build_image: true
+    networks:
+      - name: drbd-tls-${MOLECULE_DISTRO:-debian13}
+provisioner:
+  name: ansible
+  playbooks:
+    prepare: prepare/playbook.yml
+    converge: converge/playbook.yml
+    verify: verify/playbook.yml
+    side_effect: side_effect/playbook.yml
+  inventory:
+    group_vars:
+      all:
+        ansible_become: false
+        # The container runs the CI host's kernel: build for the distribution's headers, never load a module
+        drbd_kernel_headers_package: linux-headers-amd64
+        drbd_module_load: false
+        drbd_dkms_spaas: false
+        drbd_dkms_local_spatch: true
+        # LINBIT's ktls-utils, not the distribution's
+        drbd_apt_pins:
+          drbd-utils: "9.*"
+          ktls-utils: "1.5.*"
+        drbd_tls: true
+        drbd_tls_certificate: /etc/ssl/example/cert.pem
+        drbd_tls_private_key: /etc/ssl/example/key.pem
+        drbd_tls_truststore: /etc/ssl/example/ca.pem
+        # The CI host's /boot/config-* is not in the container: a config with the options set
+        drbd_tls_kernel_config: /root/kernel-config
+        drbd_tls_loglevel: 1
+verifier:
+  name: ansible
+scenario:
+  name: tls
+  test_sequence:
+    - dependency
+    - destroy
+    - create
+    - prepare
+    - check
+    - converge
+    - verify
+    - idempotence
+    - side_effect
+    - destroy

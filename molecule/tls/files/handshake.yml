@@ -1,0 +1,35 @@
+---
+# A mutual TLS handshake from the first peer to the second with GnuTLS (the library tlshd uses), with the files
+# tlshd is configured with; molecule_client_cert overrides the client's certificate, molecule_expect ok|refused.
+- name: Server on the second peer, client certificate required and verified
+  ansible.builtin.shell: |
+    pkill -x gnutls-serv || true
+    nohup timeout 30 gnutls-serv --port 5556 --require-client-cert --verify-client-cert \
+      --x509cafile /etc/ssl/example/ca.pem --x509certfile /etc/ssl/example/cert.pem \
+      --x509keyfile /etc/ssl/example/key.pem > /root/gnutls-serv.log 2>&1 &
+    sleep 2
+  changed_when: false
+  delegate_to: "{{ ansible_play_hosts | last }}"
+  run_once: true
+
+- name: Client on the first peer
+  ansible.builtin.shell: |
+    set -o pipefail
+    echo | timeout 10 gnutls-cli --port 5556 --x509cafile /etc/ssl/example/ca.pem \
+      --x509certfile {{ molecule_client_cert | default('/etc/ssl/example/cert.pem') }} \
+      --x509keyfile /etc/ssl/example/key.pem {{ ansible_play_hosts | last }} 2>&1
+  args:
+    executable: /bin/bash
+  register: molecule_handshake
+  changed_when: false
+  failed_when: false
+  delegate_to: "{{ ansible_play_hosts | first }}"
+  run_once: true
+
+- name: The handshake went as expected
+  ansible.builtin.assert:
+    that: >-
+      ('Handshake was completed' in molecule_handshake.stdout and molecule_handshake.rc == 0)
+      if molecule_expect | default('ok') == 'ok' else molecule_handshake.rc != 0
+    fail_msg: "expected {{ molecule_expect | default('ok') }}: {{ molecule_handshake.stdout_lines[-8:] | join(' | ') }}"
+  run_once: true
