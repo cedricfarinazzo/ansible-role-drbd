@@ -1,0 +1,9 @@
+---
+# drbd-utils held at 9.34 by an APT pin: one drbd-graceful-shutdown unit.
+- name: Converge
+  hosts: all
+  roles:
+    - role: ../../../../ansible-role-drbd
+      vars:
+        drbd_apt_pins:
+          drbd-utils: "9.34.*"

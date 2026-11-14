@@ -1,11 +1,14 @@
 ---
-# Masked graceful units, then wanted ones with the ordering drop-in, then state absent removes everything the role added.
+# Masks; null leaves them and an admin's modprobe.d file alone; wanted and ordered again, a dangling link
+# removed; absent refuses live resources and reverse dependencies, keeps a source it did not write, then
+# removes everything the role added.
 - name: Mask the graceful units
   hosts: all
   roles:
     - role: ../../../../ansible-role-drbd
       vars:
         drbd_mask_graceful_shutdown: true
+        drbd_graceful_shutdown: false
   post_tasks:
     - name: The graceful units the package ships are masked
       ansible.builtin.shell: |
@@ -23,41 +26,152 @@
         executable: /bin/bash
       changed_when: false
 
-- name: Graceful shutdown wanted and ordered
+- name: Graceful facets left alone, an admin's modprobe.d file kept
   hosts: all
+  pre_tasks:
+    - name: An admin's own modprobe.d file
+      ansible.builtin.copy:
+        dest: /etc/modprobe.d/drbd.conf
+        content: "options drbd minor_count=32\n"
+        mode: "0644"
   roles:
     - role: ../../../../ansible-role-drbd
       vars:
+        drbd_module_options: {}
+        drbd_module_dkms_only: false
+  post_tasks:
+    - name: The masks and the admin's file are untouched
+      ansible.builtin.shell: |
+        fail() { echo "FAIL: $*"; exit 1; }
+        [ "$(cat /etc/modprobe.d/drbd.conf)" = 'options drbd minor_count=32' ] || fail "admin modprobe.d file changed"
+        for u in drbd-graceful-down drbd-graceful-disconnect drbd-graceful-shutdown; do
+          [ -e /lib/systemd/system/$u.service ] || continue
+          [ "$(systemctl is-enabled $u.service 2>&1)" = masked ] || fail "$u unmasked by a null default"
+        done
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+- name: Graceful shutdown wanted and ordered
+  hosts: all
+  pre_tasks:
+    # The link a drbd-utils upgrade across 9.35 leaves behind: its unit is gone
+    - name: A dangling wants link to a graceful unit not shipped
+      ansible.builtin.shell: |
+        for u in drbd-graceful-shutdown drbd-graceful-down; do
+          if [ ! -e /usr/lib/systemd/system/$u.service ]; then
+            mkdir -p /etc/systemd/system/multi-user.target.wants
+            ln -sfn /usr/lib/systemd/system/$u.service /etc/systemd/system/multi-user.target.wants/$u.service
+            echo $u; exit 0
+          fi
+        done
+      args:
+        executable: /bin/bash
+      register: molecule_dangling
+      changed_when: true
+  roles:
+    - role: ../../../../ansible-role-drbd
+      vars:
+        drbd_mask_graceful_shutdown: false
         drbd_graceful_shutdown: true
         drbd_graceful_shutdown_before:
           - example-guests.service
   post_tasks:
-    - name: The wants links and the drop-ins are there
+    - name: The wants links and the drop-ins are there, the dangling link is gone
       ansible.builtin.shell: |
         fail() { echo "FAIL: $*"; exit 1; }
         n=0
-        for u in drbd-graceful-shutdown drbd-graceful-down; do
+        for u in drbd-graceful-shutdown drbd-graceful-down drbd-graceful-disconnect; do
           [ -e /lib/systemd/system/$u.service ] || continue
           n=$((n + 1))
           [ -L /etc/systemd/system/multi-user.target.wants/$u.service ] || fail "$u not wanted"
           grep -q 'Before=example-guests.service' /etc/systemd/system/$u.service.d/50-drbd-role.conf || fail "$u drop-in missing"
         done
-        [ "$n" -gt 0 ] || fail "no graceful down unit shipped"
+        [ "$n" -gt 0 ] || fail "no graceful unit shipped"
+        d={{ molecule_dangling.stdout | default('none', true) }}
+        if [ -L /etc/systemd/system/multi-user.target.wants/$d.service ]; then fail "dangling $d link left"; fi
       args:
         executable: /bin/bash
       changed_when: false
 
-- name: Remove DRBD
+- name: Absent refuses live resources
   hosts: all
   pre_tasks:
-    # The mask path of absent: a mask the role would make, next to the wants links and drop-ins left by the play above
-    - name: A mask on the graceful units, as the role makes it
+    # First on PATH: a drbdsetup that reports a resource up
+    - name: A DRBD resource up
+      ansible.builtin.copy:
+        dest: /usr/local/sbin/drbdsetup
+        content: "#!/bin/sh\necho 'r0 role:Secondary'\n"
+        mode: "0755"
+  tasks:
+    - name: Remove DRBD with a resource up
+      block:
+        - name: Run absent
+          ansible.builtin.include_role:
+            name: ../../../../ansible-role-drbd
+          vars:
+            drbd_state: absent
+        - name: Absent ran with a resource up
+          ansible.builtin.fail:
+            msg: absent did not stop on the live resource
+      rescue:
+        - name: It stopped on the resource, before the purge
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_task.name == 'No DRBD resource is up'
+              - "'r0' in ansible_failed_result.msg"
+            fail_msg: "{{ ansible_failed_task.name }}: {{ ansible_failed_result.msg }}"
+  post_tasks:
+    - name: The fake drbdsetup is removed
       ansible.builtin.file:
-        src: /dev/null
-        dest: /etc/systemd/system/{{ item }}
-        state: link
-      loop:
-        - drbd-graceful-disconnect.service
+        path: /usr/local/sbin/drbdsetup
+        state: absent
+
+- name: Absent refuses to purge a reverse dependency
+  hosts: all
+  pre_tasks:
+    - name: A package that depends on drbd-utils
+      ansible.builtin.shell: |
+        set -euo pipefail
+        d=$(mktemp -d)
+        mkdir "$d/DEBIAN"
+        printf 'Package: example-drbd-user\nVersion: 1.0\nArchitecture: all\nMaintainer: x <x@example.com>\nDepends: drbd-utils\nDescription: test\n' > "$d/DEBIAN/control"
+        dpkg-deb --build "$d" /root/example-drbd-user.deb > /dev/null
+        dpkg -i /root/example-drbd-user.deb > /dev/null
+      args:
+        executable: /bin/bash
+      changed_when: true
+  tasks:
+    - name: Remove DRBD with a dependent installed
+      block:
+        - name: Run absent
+          ansible.builtin.include_role:
+            name: ../../../../ansible-role-drbd
+          vars:
+            drbd_state: absent
+        - name: Absent ran with a dependent
+          ansible.builtin.fail:
+            msg: absent did not stop on the reverse dependency
+      rescue:
+        - name: It stopped on the dependent, before the purge
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_task.name == "The purge removes the role's packages only"
+              - "'example-drbd-user' in ansible_failed_result.msg"
+            fail_msg: "{{ ansible_failed_task.name }}: {{ ansible_failed_result.msg }}"
+  post_tasks:
+    - name: The packages are still installed, then the dependent goes
+      ansible.builtin.shell: |
+        set -euo pipefail
+        dpkg-query -W -f '${Status}' drbd-utils | grep -q 'ok installed'
+        dpkg --purge example-drbd-user > /dev/null
+      args:
+        executable: /bin/bash
+      changed_when: true
+
+- name: Absent under method distribution keeps the source
+  hosts: all
+  pre_tasks:
     - name: Wants links and drop-ins are present before absent runs
       ansible.builtin.shell: ls /etc/systemd/system/multi-user.target.wants/drbd-graceful-*.service /etc/systemd/system/drbd-graceful-*.service.d/50-drbd-role.conf
       changed_when: false
@@ -65,16 +179,46 @@
     - role: ../../../../ansible-role-drbd
       vars:
         drbd_state: absent
-        drbd_graceful_shutdown: true
-        drbd_graceful_shutdown_before:
-          - example-guests.service
+        drbd_install_method: distribution
+  post_tasks:
+    - name: The source and keyring stay, the packages are gone
+      ansible.builtin.shell: |
+        set -o pipefail
+        fail() { echo "FAIL: $*"; exit 1; }
+        [ -f /etc/apt/sources.list.d/linbit.sources ] || fail "source removed under distribution"
+        [ -f /etc/apt/keyrings/linbit.gpg ] || fail "keyring removed under distribution"
+        if dpkg-query -W -f '${Status}' drbd-utils 2>/dev/null | grep -q 'ok installed'; then fail "drbd-utils installed"; fi
+        for u in drbd-graceful-shutdown drbd-graceful-down drbd-graceful-disconnect; do
+          if [ -e /etc/systemd/system/multi-user.target.wants/$u.service ]; then fail "$u still wanted"; fi
+          if [ -e /etc/systemd/system/$u.service.d ]; then fail "$u drop-in directory left"; fi
+        done
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+- name: Remove DRBD
+  hosts: all
+  pre_tasks:
+    # The mask path of absent: a mask as the role makes it
+    - name: A mask on the graceful units, as the role makes it
+      ansible.builtin.file:
+        src: /dev/null
+        dest: /etc/systemd/system/{{ item }}
+        state: link
+      loop:
+        - drbd-graceful-disconnect.service
+  roles:
+    - role: ../../../../ansible-role-drbd
+      vars:
+        drbd_state: absent
   post_tasks:
     - name: Nothing the role added remains
       ansible.builtin.shell: |
         set -o pipefail
         fail() { echo "FAIL: $*"; exit 1; }
         for f in /etc/apt/sources.list.d/linbit.sources /etc/apt/keyrings/linbit.gpg /var/cache/drbd \
-          /etc/modules-load.d/drbd.conf /etc/modprobe.d/drbd.conf /var/lib/dkms/drbd; do
+          /etc/modules-load.d/drbd.conf /etc/modprobe.d/drbd.conf /etc/dkms/drbd.conf \
+          /etc/apt/preferences.d/drbd.pref /var/lib/dkms/drbd; do
           if [ -e "$f" ]; then fail "$f remains"; fi
         done
         for p in drbd-dkms drbd-utils; do
@@ -83,7 +227,7 @@
         for u in drbd-graceful-shutdown drbd-graceful-down drbd-graceful-disconnect; do
           if [ -L /etc/systemd/system/$u.service ]; then fail "$u still masked"; fi
           if [ -e /etc/systemd/system/multi-user.target.wants/$u.service ]; then fail "$u still wanted"; fi
-          if [ -e /etc/systemd/system/$u.service.d/50-drbd-role.conf ]; then fail "$u drop-in left"; fi
+          if [ -e /etc/systemd/system/$u.service.d ]; then fail "$u drop-in directory left"; fi
         done
         if ls /lib/modules/*/updates/dkms/drbd.ko* 2>/dev/null; then fail "DKMS module left"; fi
       args:

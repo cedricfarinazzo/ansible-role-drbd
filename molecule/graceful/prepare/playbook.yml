@@ -1,0 +1,16 @@
+---
+- name: Prepare
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Update the package cache
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+    # The build must never reach spatch-as-a-service: its host resolves nowhere
+    - name: Block spatch-as-a-service
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        line: 0.0.0.0 spaas.drbd.io
+        unsafe_writes: true

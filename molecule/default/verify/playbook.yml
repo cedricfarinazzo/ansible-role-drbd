@@ -7,7 +7,7 @@
     molecule_fpr: "{{ '4E5385546726D13CB649872CFC05A31DB826FE48' if molecule_debian else 'CC1B5A793C04BB3905AD837734893610CEAA9512' }}"
     molecule_expected: |
       Types: deb
-      URIs: {{ 'http://packages.linbit.com/public/' if molecule_debian
+      URIs: {{ 'https://packages.linbit.com/public/' if molecule_debian
         else 'https://ppa.launchpadcontent.net/linbit/linbit-drbd9-stack/ubuntu/' }}
       Suites: {{ {'bookworm': 'proxmox-8', 'trixie': 'proxmox-9'}[ansible_facts['distribution_release']]
         if molecule_debian else ansible_facts['distribution_release'] }}
@@ -71,7 +71,14 @@
         set -o pipefail
         fail() { echo "FAIL: $*"; exit 1; }
         grep -qx drbd /etc/modules-load.d/drbd.conf || fail modules-load
-        grep -qx 'options drbd minor_count=64' /etc/modprobe.d/drbd.conf || fail modprobe.d
+        m=/etc/modprobe.d/drbd.conf
+        head -1 $m | grep -qx '# Managed by the Ansible role cedricfarinazzo.drbd' || fail "modprobe.d marker"
+        o=$(grep '^options drbd ' $m) || fail "no options line: $(cat $m)"
+        for w in minor_count=64 disable_sendpage=1; do [[ " $o " == *" $w "* ]] || fail "options miss $w: $o"; done
+        grep -q '^install drbd ' $m || fail "modprobe.d DKMS-only rule"
+        grep -qx 'Pin: version 9[.][*]' /etc/apt/preferences.d/drbd.pref || fail "APT pin"
+        # Captured first: grep -q closing the pipe early fails it under pipefail
+        p=$(apt-cache policy drbd-utils); [[ $p == *' 1001'* ]] || fail "pin not applied: $p"
         grep -qE '^\s*usage-count no;' /etc/drbd.d/global_common.conf || fail "usage-count no"
         if grep -qE '^\s*usage-count yes;' /etc/drbd.d/global_common.conf; then fail "usage-count yes"; fi
         for u in drbd-graceful-shutdown drbd-graceful-down drbd-graceful-disconnect; do
@@ -81,7 +88,7 @@
         executable: /bin/bash
       changed_when: false
 
-    - name: The graceful units shipped are wanted from boot and active; the down waits for the guests
+    - name: The graceful units shipped are wanted from boot and active; down and disconnect wait for the guests
       ansible.builtin.shell: |
         set -o pipefail
         fail() { echo "FAIL: $*"; exit 1; }
@@ -91,10 +98,42 @@
           n=$((n + 1))
           systemctl show -p WantedBy --value $u.service | grep -qw multi-user.target || fail "$u not wanted"
           systemctl is-active -q $u.service || fail "$u not active"
-          [ $u = drbd-graceful-disconnect ] && continue
           systemctl show -p Before --value $u.service | grep -qw example-guests.service || fail "$u not before"
         done
         [ "$n" -gt 0 ] || fail "no graceful unit shipped"
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: DKMS built DRBD with spatch-as-a-service off
+      ansible.builtin.shell: |
+        set -o pipefail
+        fail() { echo "FAIL: $*"; exit 1; }
+        grep -qx 'MAKE\[0\]+=" SPAAS=false"' /etc/dkms/drbd.conf || fail "no DKMS override: $(cat /etc/dkms/drbd.conf)"
+        k=$(ls -1 /lib/modules | sort -V | tail -1)
+        l=$(ls /var/lib/dkms/drbd/*/"$k"/*/log/make.log /var/lib/dkms/drbd/*/build/make.log 2>/dev/null | head -1)
+        [ -n "$l" ] || fail "no make.log for $k"
+        if grep -q '^# command:' "$l"; then
+          grep -q '^# command:.*SPAAS=false' "$l" || fail "make ran without SPAAS=false: $(grep '^# command:' "$l")"
+        else
+          # dkms before 3.1 logs no command: read MAKE as dkms does, its dkms.conf then /etc/dkms/drbd.conf
+          v=$(ls /usr/src | sed -n 's/^drbd-//p')
+          m=$(kernelver=$k kernel_source_dir=/lib/modules/$k/build bash -c \
+            ". /usr/src/drbd-$v/dkms.conf 2> /dev/null; . /etc/dkms/drbd.conf; echo \"\${MAKE[0]}\"")
+          [[ $m == *' SPAAS=false' ]] || fail "dkms MAKE without SPAAS=false: $m"
+        fi
+        if grep -q 'trying spatch-as-a-service' "$l"; then fail "spatch-as-a-service tried"; fi
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: The modprobe rule refuses a DRBD that is not a DKMS build
+      ansible.builtin.shell: |
+        set -o pipefail
+        fail() { echo "FAIL: $*"; exit 1; }
+        # The container runs the kernel of the CI host, which has no DKMS build here
+        if o=$(modprobe drbd 2>&1); then fail "modprobe drbd succeeded"; fi
+        echo "$o" | grep -q 'refusing the in-tree module' || fail "not refused by the rule: $o"
       args:
         executable: /bin/bash
       changed_when: false

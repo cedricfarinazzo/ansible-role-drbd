@@ -2,7 +2,7 @@
 SUPPORTED_DISTROS := debian12 debian13 ubuntu2404 ubuntu2604
 DEFAULT_DISTRO := debian13
 
-.PHONY: molecule-test molecule-test-all molecule-test-failure lint help check-prereqs test
+.PHONY: molecule-test molecule-test-all molecule-test-failure molecule-test-graceful lint help check-prereqs test
 
 help:
 	@echo "Available targets:"
@@ -11,6 +11,7 @@ help:
 	@echo "  molecule-test-all          - Run molecule tests against all supported distributions, in parallel"
 	@echo "  molecule-test-<distro>     - Run molecule tests against specific distribution"
 	@echo "  molecule-test-failure      - Run the failure scenario (wrong key, missing headers, broken build) on $(DEFAULT_DISTRO)"
+	@echo "  molecule-test-graceful     - Run the graceful scenario (drbd-utils 9.34 to 9.35 units) on debian12"
 	@echo "  lint                       - Run ansible-lint"
 	@echo "  help                       - Show this help message"
 	@echo ""
@@ -38,6 +39,9 @@ molecule-test-all: check-prereqs
 
 molecule-test-failure: check-prereqs
 	./run-tests.sh -s failure $(DEFAULT_DISTRO)
+
+molecule-test-graceful: check-prereqs
+	./run-tests.sh -s graceful debian12
 
 # Individual distribution targets
 molecule-test-%: check-prereqs

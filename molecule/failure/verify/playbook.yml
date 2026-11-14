@@ -16,6 +16,19 @@
         executable: /bin/bash
       changed_when: false
 
+    - name: A download holding a secret key stopped the role, nothing trusted
+      ansible.builtin.shell: |
+        set -o pipefail
+        fail() { echo "FAIL: $*"; exit 1; }
+        f=/root/molecule-sec-failure
+        [ -f $f ] || fail "the role did not fail on the secret key"
+        grep -q '^Stop on the key or source failure$' $f || fail "$(cat $f)"
+        grep -q '1 secret key' $f || fail "message: $(cat $f)"
+        if ls /var/cache/drbd/*.key 2> /dev/null; then fail "download left"; fi
+      args:
+        executable: /bin/bash
+      changed_when: false
+
     - name: Without headers the role stopped on the DKMS step and printed dkms's output
       ansible.builtin.shell: |
         set -o pipefail

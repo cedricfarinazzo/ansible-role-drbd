@@ -1,39 +1,47 @@
 ---
+# http:// is accepted for a source set by the user (APT checks the signatures); the defaults are https.
 # A wrong type here would write a different, valid config, or trust the wrong key: check every input first.
 - name: Settings are sound
   ansible.builtin.assert:
     that:
       - drbd_state in ['present', 'absent']
       - drbd_install_method in ['linbit', 'distribution']
-      - drbd_apt_keyring is string and drbd_apt_keyring is match('^/[A-Za-z0-9._/-]+$')
+      - drbd_apt_keyring is string and drbd_apt_keyring is match('^/[A-Za-z0-9._/-]+\Z')
       - drbd_packages is sequence and drbd_packages is not string and drbd_packages | length > 0
       - drbd_packages_extra is sequence and drbd_packages_extra is not string
-      - (drbd_packages + drbd_packages_extra) | map('string') | reject('match', '^[a-z0-9][a-z0-9.+-]+$')
+      - (drbd_packages + drbd_packages_extra) | map('string') | reject('match', '^[a-z0-9][a-z0-9.+-]+\Z')
         | list | length == 0
       - drbd_kernel_headers_package is string
-      - drbd_kernel_headers_package in ['', 'auto'] or drbd_kernel_headers_package is match('^[a-z0-9][a-z0-9.+-]+$')
+      - drbd_kernel_headers_package in ['', 'auto'] or drbd_kernel_headers_package is match('^[a-z0-9][a-z0-9.+-]+\Z')
       - drbd_dkms_kernels == 'auto' or (drbd_dkms_kernels is sequence and drbd_dkms_kernels is not string)
       - drbd_dkms_kernels == 'auto' or drbd_dkms_kernels | map('string')
-        | reject('match', '^[0-9][A-Za-z0-9.+_~-]*$') | list | length == 0
+        | reject('match', '^[0-9][A-Za-z0-9.+_~-]*\Z') | list | length == 0
       - drbd_module_load is boolean and drbd_module_load_at_boot is boolean
       - drbd_module_options is mapping
-      - drbd_module_options.keys() | map('string') | reject('match', '^[a-z_]+$') | list | length == 0
-      - drbd_module_options.values() | map('string') | reject('match', '^[A-Za-z0-9,._-]+$') | list | length == 0
+      - drbd_module_options.keys() | map('string') | reject('match', '^[a-z_]+\Z') | list | length == 0
+      - drbd_module_options.values() | map('string') | reject('match', '^[A-Za-z0-9,._-]+\Z') | list | length == 0
+      - drbd_apt_pins is mapping
+      - drbd_apt_pins.keys() | map('string') | reject('match', '^[a-z0-9][a-z0-9.+-]+\Z') | list | length == 0
+      - drbd_apt_pins.values() | map('string') | reject('match', '^[A-Za-z0-9.+~:*-]+\Z') | list | length == 0
+      - drbd_dkms_spaas is boolean and drbd_dkms_local_spatch is boolean
+      - drbd_module_dkms_only is boolean
       - drbd_usage_count is boolean
-      - drbd_mask_graceful_shutdown is boolean and drbd_graceful_shutdown is boolean
-      - not (drbd_mask_graceful_shutdown and drbd_graceful_shutdown)
+      - drbd_mask_graceful_shutdown is none or drbd_mask_graceful_shutdown is boolean
+      - drbd_graceful_shutdown is none or drbd_graceful_shutdown is boolean
+      - not (drbd_mask_graceful_shutdown is true and drbd_graceful_shutdown is true)
       - drbd_graceful_shutdown_wanted_by is string
-      - drbd_graceful_shutdown_wanted_by is match('^[A-Za-z0-9:_.@-]+[.]target$')
+      - drbd_graceful_shutdown_wanted_by is match('^[A-Za-z0-9:_.@-]+[.]target\Z')
       - drbd_graceful_shutdown_before is sequence and drbd_graceful_shutdown_before is not string
-      - drbd_graceful_shutdown_before | map('string') | reject('match', '^[A-Za-z0-9:_.@-]+[.][a-z]+$')
+      - drbd_graceful_shutdown_before | map('string') | reject('match', '^[A-Za-z0-9:_.@-]+[.][a-z]+\Z')
         | list | length == 0
-      - drbd_dkms_log_lines | string is match('^[0-9]+$') and drbd_dkms_log_lines | int > 0
+      - drbd_dkms_log_lines | string is match('^[0-9]+\Z') and drbd_dkms_log_lines | int > 0
     fail_msg: >-
       drbd_state present|absent; drbd_install_method linbit|distribution; drbd_apt_keyring an absolute path;
       drbd_packages non-empty and drbd_packages_extra lists of package names; drbd_kernel_headers_package
-      auto, '' or a package name; drbd_dkms_kernels auto or a list of kernel releases; drbd_module_load,
-      drbd_module_load_at_boot, drbd_usage_count, drbd_mask_graceful_shutdown and drbd_graceful_shutdown booleans,
-      not both true; drbd_graceful_shutdown_wanted_by a target; drbd_graceful_shutdown_before a list of unit
+      auto, '' or a package name; drbd_apt_pins a mapping of package names to version globs; drbd_dkms_kernels
+      auto or a list of kernel releases; drbd_module_load, drbd_module_load_at_boot, drbd_module_dkms_only,
+      drbd_dkms_spaas, drbd_dkms_local_spatch and drbd_usage_count booleans; drbd_mask_graceful_shutdown and
+      drbd_graceful_shutdown null or booleans, not both true; drbd_graceful_shutdown_wanted_by a target; drbd_graceful_shutdown_before a list of unit
       names; drbd_module_options
       a mapping of lower-case names to plain values; drbd_dkms_log_lines above 0
     quiet: true
@@ -41,13 +49,13 @@
 - name: LINBIT source is complete
   ansible.builtin.assert:
     that:
-      - drbd_repo_url is match('^https?://[A-Za-z0-9.:/_~%-]+/$')
-      - drbd_repo_suite is match('^[A-Za-z0-9._-]+$')
+      - drbd_repo_url is match('^https?://[A-Za-z0-9.:/_~%-]+/\Z')
+      - drbd_repo_suite is match('^[A-Za-z0-9._-]+\Z')
       - drbd_repo_components is sequence and drbd_repo_components is not string and drbd_repo_components | length > 0
-      - drbd_repo_components | map('string') | reject('match', '^[A-Za-z0-9._-]+$') | list | length == 0
-      - drbd_key_url is match('^https://[^\s]+$')
-      - drbd_key_deb_member is match('^([A-Za-z0-9._/-]+)?$')
-      - drbd_key_fingerprint is match('^[0-9A-F]{40}$')
+      - drbd_repo_components | map('string') | reject('match', '^[A-Za-z0-9._-]+\Z') | list | length == 0
+      - drbd_key_url is match('^https://[^\s]+\Z')
+      - drbd_key_deb_member is match('^([A-Za-z0-9._/-]+)?\Z')
+      - drbd_key_fingerprint is match('^[0-9A-F]{40}\Z')
     fail_msg: >-
       drbd_install_method linbit: no LINBIT source known for {{ ansible_facts.distribution | default('?') }}
       {{ ansible_facts.distribution_release | default('') }}, or an incomplete one. Set drbd_apt_repo_url (ending

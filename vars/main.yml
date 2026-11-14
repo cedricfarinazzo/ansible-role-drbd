@@ -3,7 +3,7 @@
 # drbd-dkms (bookworm/trixie hold userland only). Ubuntu: LINBIT's Launchpad PPA
 drbd_linbit_sources:
   Debian:
-    url: http://packages.linbit.com/public/
+    url: https://packages.linbit.com/public/
     suites:
       bookworm: proxmox-8
       trixie: proxmox-9
@@ -42,16 +42,17 @@ drbd_key_download: "{{ drbd_cache_dir }}/{{ drbd_key_fingerprint }}.{{ 'deb' if 
 drbd_key_file: "{{ drbd_cache_dir ~ '/' ~ drbd_key_fingerprint ~ '.gpg' if drbd_key_deb_member else drbd_key_download }}"
 drbd_modules_load_file: /etc/modules-load.d/drbd.conf
 drbd_modprobe_file: /etc/modprobe.d/drbd.conf
+# First line of every file the role writes and may remove: a file without it is never removed
+drbd_marker: "# Managed by the Ansible role cedricfarinazzo.drbd"
+drbd_dkms_conf: /etc/dkms/drbd.conf
+drbd_apt_pin_file: /etc/apt/preferences.d/drbd.pref
 drbd_global_conf: /etc/drbd.d/global_common.conf
-# drbd-utils 9.28 to 9.34 ship drbd-graceful-shutdown; 9.35 splits it into down and disconnect
+# drbd-utils 9.28 to 9.34 ship drbd-graceful-shutdown; 9.35 splits it into down and disconnect. Each stops
+# replication at shutdown (drbdsetup down all, or a disconnect), so each gets the Before= drop-in
 drbd_graceful_units:
   - drbd-graceful-shutdown.service
   - drbd-graceful-down.service
   - drbd-graceful-disconnect.service
-# The ones whose ExecStop takes every resource down: drbd_graceful_shutdown_before orders them
-drbd_graceful_down_units:
-  - drbd-graceful-shutdown.service
-  - drbd-graceful-down.service
 drbd_unit_dir: /usr/lib/systemd/system
 drbd_graceful_dropin: 50-drbd-role.conf
 
@@ -70,3 +71,6 @@ drbd_dkms_targets: >-
 drbd_dkms_installed: >-
   {{ drbd_dkms_status.stdout_lines | default([]) | select('search', ': installed')
      | map('regex_findall', '^[^,]+, ([^,]+), ') | map('first') | list }}
+# Booleans as 1/0: "True" is no module parameter value
+drbd_module_options_line: >-
+  options drbd {% for k, v in drbd_module_options.items() %}{{ k }}={{ (v | int) if v is boolean else v }}{{ ' ' if not loop.last }}{% endfor %}

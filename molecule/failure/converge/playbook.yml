@@ -8,6 +8,42 @@
         src: /root/molecule-kernel
       register: molecule_kernel_file
 
+    # Seeded in the key cache, so the role reads it instead of downloading its (made-up) URL
+    - name: A key download that holds a secret key
+      block:
+        - name: GnuPG to make the key
+          ansible.builtin.apt:
+            name: gpg
+
+        - name: Make a key pair and seed its public and secret parts as the download
+          ansible.builtin.shell: |
+            set -euo pipefail
+            export GNUPGHOME=$(mktemp -d)
+            gpg --batch --passphrase '' --quick-gen-key 'Example Key <key@example.com>' ed25519 sign never 2> /dev/null
+            f=$(gpg --batch --with-colons --list-keys | awk -F: '/^fpr:/ {print $10; exit}')
+            mkdir -p /var/cache/drbd
+            { gpg --batch --armor --export "$f"; gpg --batch --armor --pinentry-mode loopback --passphrase '' --export-secret-keys "$f"; } \
+              > /var/cache/drbd/$f.key
+            echo "$f"
+          args:
+            executable: /bin/bash
+          register: molecule_sec_fpr
+          changed_when: true
+
+        - name: Run the role on a download with a secret key
+          ansible.builtin.include_role:
+            name: ../../../../ansible-role-drbd
+          vars:
+            drbd_apt_key_url: https://keys.example.com/example.asc
+            drbd_apt_key_fingerprint: "{{ molecule_sec_fpr.stdout }}"
+            drbd_kernel_headers_package: ""
+      rescue:
+        - name: Record the secret key failure
+          ansible.builtin.copy:
+            dest: /root/molecule-sec-failure
+            content: "{{ ansible_failed_task.name }}\n{{ ansible_failed_result.msg }}\n"
+            mode: "0644"
+
     - name: A downloaded key with another fingerprint
       block:
         - name: Run the role with a wrong pinned fingerprint

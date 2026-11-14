@@ -1,18 +1,36 @@
 ---
-- name: Module parameters
+# Written with the role's marker; a file without it is an admin's and is never removed
+- name: Find the modprobe.d file
+  ansible.builtin.slurp:
+    src: "{{ drbd_modprobe_file }}"
+  register: drbd_modprobe_read
+  failed_when: false
+
+- name: Module parameters and the DKMS-only load rule
   ansible.builtin.copy:
     dest: "{{ drbd_modprobe_file }}"
-    content: "options drbd {{ drbd_module_options.items() | map('join', '=') | join(' ') }}\n"
+    content: |
+      {{ drbd_marker }}
+      {% if drbd_module_options | length > 0 %}
+      {{ drbd_module_options_line }}
+      {% endif %}
+      {% if drbd_module_dkms_only %}
+      # A kernel DKMS did not build for would load its in-tree DRBD 8.4: refuse it
+      install drbd /bin/sh -c 'case "$(/sbin/modinfo -n drbd 2>/dev/null)" in */updates/*) exec /sbin/modprobe --ignore-install drbd $CMDLINE_OPTS;; esac; echo "drbd: no DKMS build of DRBD 9 for $(uname -r), refusing the in-tree module" >&2; exit 1'
+      {% endif %}
     owner: root
     group: root
     mode: "0644"
-  when: drbd_module_options | length > 0
+  register: drbd_modprobe_written
+  when: drbd_module_options | length > 0 or drbd_module_dkms_only
 
-- name: No module parameters
+- name: No module parameters nor load rule
   ansible.builtin.file:
     path: "{{ drbd_modprobe_file }}"
     state: absent
-  when: drbd_module_options | length == 0
+  when:
+    - drbd_module_options | length == 0 and not drbd_module_dkms_only
+    - (drbd_modprobe_read.content | default('') | b64decode).startswith(drbd_marker)
 
 - name: Module loaded at boot
   ansible.builtin.copy:
@@ -68,12 +86,26 @@
           no DKMS build (its headers missing: reboot into a kernel listed by dkms status drbd), or modprobe
           finds the in-tree module first
         quiet: true
+
+    # A loaded 9.x is never reloaded by the role: a new build or new options wait for a reload or a reboot
+    - name: Report a loaded DRBD that differs from the build or its options
+      ansible.builtin.debug:
+        msg: >-
+          {{ 'Loaded drbd ' ~ drbd_loaded_now.stdout ~ ' is not the DKMS build ' ~ drbd_dkms_version ~ '. '
+          if drbd_loaded_stale else '' }}{{ 'Module options changed. ' if drbd_options_stale else '' }}Reload
+          drbd (resources down, then modprobe -r drbd; modprobe drbd) or reboot to apply.
+      when: not ansible_check_mode and (drbd_loaded_stale or drbd_options_stale)
+      vars:
+        drbd_loaded_stale: >-
+          {{ drbd_loaded_now.stdout is match('^9[.]') and drbd_dkms_version | length > 0
+          and not drbd_dkms_version.startswith(drbd_loaded_now.stdout) }}
+        drbd_options_stale: "{{ drbd_modprobe_written is changed and drbd_loaded.rc == 0 }}"
   rescue:
     - name: Stop on the module failure
       ansible.builtin.fail:
         msg: >-
-          {{ 'drbd ' ~ drbd_loaded.stdout ~ ' is loaded and in use: stop its resources (drbdadm down all), then run
-          again' if drbd_unload is failed else ansible_failed_result.msg | default('modprobe drbd failed') }}
+          {{ 'drbd ' ~ drbd_loaded.stdout ~ ' is loaded and in use: stop its resources (drbdsetup down all), then
+          run again' if drbd_unload is failed else ansible_failed_result.msg | default('modprobe drbd failed') }}
 
 - name: Find the DRBD global config
   ansible.builtin.stat:
@@ -87,115 +119,5 @@
     replace: '\1usage-count {{ "yes" if drbd_usage_count else "no" }};'
   when: drbd_global_conf_stat.stat.exists
 
-# systemctl mask, as a link: the graceful units have no [Install] section, and a missing unit is no error
-- name: Find the graceful units' masks
-  ansible.builtin.stat:
-    path: /etc/systemd/system/{{ item }}
-  loop: "{{ drbd_graceful_units }}"
-  register: drbd_graceful_masks
-
-- name: Mask the graceful units
-  ansible.builtin.file:
-    src: /dev/null
-    dest: /etc/systemd/system/{{ item }}
-    state: link
-  loop: "{{ drbd_graceful_units }}"
-  register: drbd_graceful_masked
-  when: drbd_mask_graceful_shutdown
-
-# Only a mask the role would have made: never an admin's own unit file
-- name: Unmask the graceful units
-  ansible.builtin.file:
-    path: "{{ item.stat.path }}"
-    state: absent
-  loop: "{{ drbd_graceful_masks.results }}"
-  loop_control:
-    label: "{{ item.item }}"
-  register: drbd_graceful_unmasked
-  when: not drbd_mask_graceful_shutdown and item.stat.islnk | default(false) and item.stat.lnk_target == '/dev/null'
-
-- name: Find the graceful units shipped
-  ansible.builtin.stat:
-    path: "{{ drbd_unit_dir }}/{{ item }}"
-  loop: "{{ drbd_graceful_units }}"
-  register: drbd_graceful_shipped
-
-- name: Directory of the target that wants the graceful units
-  ansible.builtin.file:
-    path: /etc/systemd/system/{{ drbd_graceful_shutdown_wanted_by }}.wants
-    state: directory
-    mode: "0755"
-  when: drbd_graceful_shutdown
-
-# systemctl add-wants, as a link: the units have no [Install] section to enable
-- name: Graceful units wanted from boot
-  ansible.builtin.file:
-    src: "{{ item.stat.path }}"
-    dest: /etc/systemd/system/{{ drbd_graceful_shutdown_wanted_by }}.wants/{{ item.item }}
-    state: link
-  loop: "{{ drbd_graceful_shipped.results }}"
-  loop_control:
-    label: "{{ item.item }}"
-  register: drbd_graceful_wanted
-  when: drbd_graceful_shutdown and item.stat.exists
-
-- name: Graceful units no longer wanted
-  ansible.builtin.file:
-    path: /etc/systemd/system/{{ drbd_graceful_shutdown_wanted_by }}.wants/{{ item }}
-    state: absent
-  loop: "{{ drbd_graceful_units }}"
-  register: drbd_graceful_unwanted
-  when: not drbd_graceful_shutdown
-
-- name: Drop-in directories of the graceful down units
-  ansible.builtin.file:
-    path: /etc/systemd/system/{{ item.item }}.d
-    state: directory
-    mode: "0755"
-  loop: "{{ drbd_graceful_shipped.results }}"
-  loop_control:
-    label: "{{ item.item }}"
-  when:
-    - drbd_graceful_shutdown and drbd_graceful_shutdown_before | length > 0
-    - item.stat.exists and item.item in drbd_graceful_down_units
-
-# Before= at start is After= at stop: the down runs once those units have stopped
-- name: Graceful down ordered after the units that use DRBD
-  ansible.builtin.copy:
-    content: |
-      [Unit]
-      Before={{ drbd_graceful_shutdown_before | join(' ') }}
-    dest: /etc/systemd/system/{{ item.item }}.d/{{ drbd_graceful_dropin }}
-    mode: "0644"
-  loop: "{{ drbd_graceful_shipped.results }}"
-  loop_control:
-    label: "{{ item.item }}"
-  register: drbd_graceful_ordered
-  when:
-    - drbd_graceful_shutdown and drbd_graceful_shutdown_before | length > 0
-    - item.stat.exists and item.item in drbd_graceful_down_units
-
-- name: No ordering drop-in when none is asked
-  ansible.builtin.file:
-    path: /etc/systemd/system/{{ item }}.d/{{ drbd_graceful_dropin }}
-    state: absent
-  loop: "{{ drbd_graceful_down_units }}"
-  register: drbd_graceful_unordered
-  when: not (drbd_graceful_shutdown and drbd_graceful_shutdown_before | length > 0)
-
-- name: Reload systemd for the graceful units
-  ansible.builtin.systemd_service:
-    daemon_reload: true
-  when: >-
-    drbd_graceful_masked is changed or drbd_graceful_unmasked is changed or drbd_graceful_wanted is changed
-    or drbd_graceful_unwanted is changed or drbd_graceful_ordered is changed or drbd_graceful_unordered is changed
-
-# Active now, so this boot's shutdown takes DRBD down too
-- name: Graceful units started
-  ansible.builtin.systemd_service:
-    name: "{{ item.item }}"
-    state: started
-  loop: "{{ drbd_graceful_shipped.results }}"
-  loop_control:
-    label: "{{ item.item }}"
-  when: drbd_graceful_shutdown and item.stat.exists
+- name: Graceful shutdown units
+  ansible.builtin.include_tasks: graceful.yml
