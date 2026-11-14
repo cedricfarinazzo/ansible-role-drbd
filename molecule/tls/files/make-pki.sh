@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Throwaway test PKI: make-pki.sh DIR NAME...; a CA, another CA, and per NAME a key and a certificate (SAN NAME)
-# signed by the CA, one signed by the other CA, one expired; plus a stray key that matches no certificate.
+# signed by the CA, one signed by the other CA, one expired (OpenSSL 3.4+); plus a stray key that matches no certificate.
 set -euo pipefail
 d=$1; shift
 mkdir -p "$d"; cd "$d"
@@ -24,6 +24,9 @@ for n in "$@"; do
   [ -f "$n.key" ] || openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out "$n.key" 2> /dev/null
   sign ca "$n" "$n" -days 30
   sign other-ca "$n" "$n-other-ca" -days 30
-  sign ca "$n" "$n-expired" -not_before 20200101000000Z -not_after 20200201000000Z
+  # x509 -not_after needs OpenSSL 3.4+ (Debian 13); the expired case runs there only (tls-failure)
+  if openssl x509 -help 2>&1 | grep -q -- -not_after; then
+    sign ca "$n" "$n-expired" -not_before 20200101000000Z -not_after 20200201000000Z
+  fi
 done
 chmod 0600 ./*.key

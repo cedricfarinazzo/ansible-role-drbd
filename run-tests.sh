@@ -13,7 +13,7 @@ show_usage() {
     echo "failure (a wrong key fingerprint, missing kernel headers, a broken kernel Makefile: the role must stop),"
     echo "graceful (Debian 12 only: drbd-utils pinned to 9.34, then upgraded across the 9.35 unit split),"
     echo "tls (Debian only: two peers, tlshd on a test CA, restart on a new certificate, a wrong CA refused, absent),"
-    echo "tls-failure (Debian only: bad certificate, key or CA, a kernel without the handshake upcall: the role must stop)."
+    echo "tls-failure (Debian 13 only: bad certificate, key or CA, a kernel without the handshake upcall: the role must stop)."
     echo "Several distributions, or 'all', run in parallel; each writes .molecule-logs/<scenario>-<distro>.log."
     echo
     echo "Supported: ${SUPPORTED// /, }"
@@ -41,7 +41,9 @@ distros=("$@")
 # graceful needs LINBIT's proxmox-8 suite, the only public one with drbd-utils 9.34 and 9.35 side by side
 if [[ $SCENARIO == graceful ]]; then SUPPORTED=debian12; fi
 # tls pins LINBIT's ktls-utils, in its Debian suites only
-if [[ $SCENARIO == tls || $SCENARIO == tls-failure ]]; then SUPPORTED="debian12 debian13"; fi
+if [[ $SCENARIO == tls ]]; then SUPPORTED="debian12 debian13"; fi
+# tls-failure's expired certificate needs OpenSSL 3.4+ (x509 -not_after)
+if [[ $SCENARIO == tls-failure ]]; then SUPPORTED=debian13; fi
 default_distro=debian13
 if [[ $SCENARIO == graceful ]]; then default_distro=debian12; fi
 if [[ ${#distros[@]} -eq 0 ]]; then distros=("$default_distro"); fi

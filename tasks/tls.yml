@@ -23,7 +23,10 @@
   when: ansible_check_mode and drbd_tls_absent_files | length > 0
 
 - name: Certificate, key and CA in place, tlshd
-  when: not (ansible_check_mode and (drbd_tls_absent_files | length > 0 or drbd_tls_installed is changed))
+  # Check mode on a fresh host: no package (or none known yet), so no tlshd unit to check
+  when: >-
+    not (ansible_check_mode and (drbd_tls_absent_files | length > 0 or drbd_tls_installed is changed
+    or drbd_tls_installed is failed))
   block:
     - name: The certificate, key and CA are files
       ansible.builtin.assert:
