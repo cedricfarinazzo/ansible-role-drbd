@@ -33,6 +33,7 @@
         - {name: mismatched-key, task: "The certificate, key and CA fit together", msg: "/root/pki/stray.key does not match"}
         - {name: key-mode, task: "The key is owned by root, mode 0600 or 0640", msg: "mode 0644"}
         - {name: key-owner, task: "The key is owned by root, mode 0600 or 0640", msg: "is owned by nobody"}
+        - {name: sibling-intermediate, task: "The certificate, key and CA fit together", msg: "is not signed by /root/pki/inter.pem"}
         - {name: intermediate-truststore, task: "passed", msg: "passed"}
         - {name: symlinked-key, task: "passed", msg: "passed"}
       loop_control:

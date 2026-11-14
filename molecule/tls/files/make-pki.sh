@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Throwaway test PKI: make-pki.sh DIR NAME...; a CA, another CA, and per NAME a key and a certificate (SAN NAME)
-# signed by the CA, one by the other CA, one by an intermediate, one expired (OpenSSL 3.4+); plus a stray key that matches no certificate.
+# signed by the CA, one by the other CA, one by each of two sibling intermediates, one expired (OpenSSL 3.4+); plus a stray key that matches no certificate.
 set -euo pipefail
 d=$1; shift
 mkdir -p "$d"; cd "$d"
@@ -19,20 +19,22 @@ sign() {
 }
 [ -f ca.pem ] || ca ca "Example Test CA"
 [ -f other-ca.pem ] || ca other-ca "Example Other CA"
-# An intermediate CA under the CA: its leaves chain to it alone (a truststore holding the intermediate only)
-if [ ! -f inter.pem ]; then
-  openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out inter.key 2> /dev/null
-  openssl req -new -key inter.key -subj "/CN=Example Intermediate CA" -out inter.csr
-  printf 'basicConstraints=critical,CA:TRUE\nkeyUsage=critical,keyCertSign,cRLSign\n' > inter.ext
-  openssl x509 -req -in inter.csr -CA ca.pem -CAkey ca.key -extfile inter.ext -days 30 -out inter.pem 2> /dev/null
-  rm -f inter.csr inter.ext
-fi
+# Intermediate CAs under the CA, siblings: a leaf chains to its own alone (a truststore holding one intermediate only)
+for i in inter inter2; do
+  [ -f "$i.pem" ] && continue
+  openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out "$i.key" 2> /dev/null
+  openssl req -new -key "$i.key" -subj "/CN=Example Intermediate CA $i" -out "$i.csr"
+  printf 'basicConstraints=critical,CA:TRUE\nkeyUsage=critical,keyCertSign,cRLSign\n' > "$i.ext"
+  openssl x509 -req -in "$i.csr" -CA ca.pem -CAkey ca.key -extfile "$i.ext" -days 30 -out "$i.pem" 2> /dev/null
+  rm -f "$i.csr" "$i.ext"
+done
 [ -f stray.key ] || openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out stray.key 2> /dev/null
 for n in "$@"; do
   [ -f "$n.key" ] || openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out "$n.key" 2> /dev/null
   sign ca "$n" "$n" -days 30
   sign other-ca "$n" "$n-other-ca" -days 30
   sign inter "$n" "$n-inter" -days 30
+  sign inter2 "$n" "$n-inter2" -days 30
   # x509 -not_after needs OpenSSL 3.4+ (Debian 13); the expired case runs there only (tls-failure)
   if openssl x509 -help 2>&1 | grep -q -- -not_after; then
     sign ca "$n" "$n-expired" -not_before 20200101000000Z -not_after 20200201000000Z

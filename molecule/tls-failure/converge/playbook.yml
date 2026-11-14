@@ -18,6 +18,7 @@
         - {name: mismatched-key, vars: {drbd_tls_private_key: /root/pki/stray.key}}
         - {name: key-mode, vars: {drbd_tls_private_key: /root/key-0644.pem}}
         - {name: key-owner, vars: {drbd_tls_private_key: /root/key-nobody.pem}}
+        - {name: sibling-intermediate, vars: {drbd_tls_certificate: /root/pki/node-inter2.pem, drbd_tls_truststore: /root/pki/inter.pem}}
         - {name: intermediate-truststore, vars: {drbd_tls_certificate: /root/pki/node-inter.pem, drbd_tls_truststore: /root/pki/inter.pem}}
         - {name: symlinked-key, vars: {drbd_tls_private_key: /root/key-link.pem}}
       loop_control:
