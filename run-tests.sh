@@ -10,7 +10,8 @@ show_usage() {
     echo
     echo "Run a Molecule scenario of the drbd role (default: the default scenario on debian13)."
     echo "Scenarios: default (LINBIT source, DKMS build, idempotence, then state absent),"
-    echo "failure (a wrong key fingerprint, missing kernel headers, a broken kernel Makefile: the role must stop)."
+    echo "failure (a wrong key fingerprint, missing kernel headers, a broken kernel Makefile: the role must stop),"
+    echo "graceful (Debian 12 only: drbd-utils pinned to 9.34, then upgraded across the 9.35 unit split)."
     echo "Several distributions, or 'all', run in parallel; each writes .molecule-logs/<scenario>-<distro>.log."
     echo
     echo "Supported: ${SUPPORTED// /, }"
@@ -20,6 +21,7 @@ show_usage() {
     echo "  $0 ubuntu2404            # Ubuntu 24.04"
     echo "  $0 all                   # every supported distribution, in parallel"
     echo "  $0 -s failure debian13   # the failure paths"
+    echo "  $0 -s graceful           # the 9.34 to 9.35 graceful units (Debian 12)"
 }
 
 if [[ ${1:-} == -h || ${1:-} == --help ]]; then show_usage; exit 0; fi
@@ -33,7 +35,11 @@ NC='\033[0m'
 VENV_PATH=.venv
 
 distros=("$@")
-if [[ ${#distros[@]} -eq 0 ]]; then distros=(debian13); fi
+# graceful needs LINBIT's proxmox-8 suite, the only public one with drbd-utils 9.34 and 9.35 side by side
+if [[ $SCENARIO == graceful ]]; then SUPPORTED=debian12; fi
+default_distro=debian13
+if [[ $SCENARIO == graceful ]]; then default_distro=debian12; fi
+if [[ ${#distros[@]} -eq 0 ]]; then distros=("$default_distro"); fi
 if [[ ${distros[*]} == all ]]; then read -ra distros <<< "$SUPPORTED"; fi
 for d in "${distros[@]}"; do
     if [[ " $SUPPORTED " != *" $d "* ]]; then echo -e "${RED}Unsupported distribution: $d${NC}"; show_usage; exit 1; fi

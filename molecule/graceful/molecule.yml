@@ -1,0 +1,50 @@
+---
+# Debian 12 only: LINBIT's proxmox-8 suite still publishes drbd-utils 9.34 (one drbd-graceful-shutdown unit)
+# next to 9.35 (down and disconnect units), the only public pair of packages that crosses the split.
+dependency:
+  name: galaxy
+driver:
+  name: docker
+platforms:
+  - name: drbd-graceful-${MOLECULE_DISTRO:-debian12}
+    hostname: drbd-graceful
+    image: "geerlingguy/docker-${MOLECULE_DISTRO:-debian12}-ansible:latest"
+    command: ${MOLECULE_DOCKER_COMMAND:-""}
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    cgroupns_mode: host
+    privileged: true
+    pre_build_image: true
+provisioner:
+  name: ansible
+  playbooks:
+    prepare: prepare/playbook.yml
+    converge: converge/playbook.yml
+    verify: verify/playbook.yml
+    side_effect: side_effect/playbook.yml
+  inventory:
+    group_vars:
+      all:
+        ansible_become: false
+        drbd_kernel_headers_package: linux-headers-amd64
+        drbd_module_load: false
+        # Offline build, as in the default scenario
+        drbd_dkms_spaas: false
+        drbd_dkms_local_spatch: true
+        drbd_graceful_shutdown: true
+        drbd_graceful_shutdown_before:
+          - example-guests.service
+verifier:
+  name: ansible
+scenario:
+  name: graceful
+  test_sequence:
+    - dependency
+    - destroy
+    - create
+    - prepare
+    - converge
+    - verify
+    - idempotence
+    - side_effect
+    - destroy

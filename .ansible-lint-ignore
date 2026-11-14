@@ -2,3 +2,5 @@
 molecule/default/converge/playbook.yml role-name[path]
 molecule/default/side_effect/playbook.yml role-name[path]
 molecule/failure/converge/playbook.yml role-name[path]
+molecule/graceful/converge/playbook.yml role-name[path]
+molecule/graceful/side_effect/playbook.yml role-name[path]

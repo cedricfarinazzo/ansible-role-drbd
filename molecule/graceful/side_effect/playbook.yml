@@ -1,0 +1,91 @@
+---
+# An unattended upgrade of drbd-utils across the 9.35 split, then the role again: the wants link of the
+# removed unit dangles until the role drops it, and the new units are wanted, ordered and active.
+- name: Upgrade drbd-utils to 9.35 behind the role's back
+  hosts: all
+  tasks:
+    - name: Install the newest 9.35 over the pinned 9.34
+      ansible.builtin.shell: |
+        set -euo pipefail
+        v=$(apt-cache madison drbd-utils | awk '{print $3}' | grep '^9[.]35[.]' | sort -V | tail -1)
+        [ -n "$v" ]
+        DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+          -o Dpkg::Options::=--force-confold "drbd-utils=$v"
+      args:
+        executable: /bin/bash
+      changed_when: true
+
+    - name: The old unit is gone and its wants link dangles; the old drop-in is still there
+      ansible.builtin.shell: |
+        fail() { echo "FAIL: $*"; exit 1; }
+        u=drbd-graceful-shutdown.service
+        [ ! -e /usr/lib/systemd/system/$u ] || fail "$u still shipped"
+        [ -L /etc/systemd/system/multi-user.target.wants/$u ] || fail "no wants link to dangle"
+        [ ! -e /etc/systemd/system/multi-user.target.wants/$u ] || fail "link does not dangle"
+        [ -f /etc/systemd/system/$u.d/50-drbd-role.conf ] || fail "no stale drop-in"
+        for d in down disconnect; do
+          [ -e /usr/lib/systemd/system/drbd-graceful-$d.service ] || fail "drbd-graceful-$d not shipped"
+          [ ! -e /etc/systemd/system/multi-user.target.wants/drbd-graceful-$d.service ] || fail "$d wanted already"
+        done
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+- name: The role again, pinned to 9.35
+  hosts: all
+  roles:
+    - role: ../../../../ansible-role-drbd
+      vars:
+        drbd_apt_pins:
+          drbd-utils: "9.35.*"
+  post_tasks:
+    - name: The dangling link and the stale drop-in are gone
+      ansible.builtin.shell: |
+        set -o pipefail
+        fail() { echo "FAIL: $*"; exit 1; }
+        u=drbd-graceful-shutdown.service
+        [ ! -L /etc/systemd/system/multi-user.target.wants/$u ] || fail "dangling wants link left"
+        [ ! -e /etc/systemd/system/$u.d/50-drbd-role.conf ] || fail "stale drop-in left"
+        l=$(ls -A /etc/systemd/system/multi-user.target.wants); [[ $'\n'$l$'\n' != *$'\n'$u$'\n'* ]] || fail "wants entry left"
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: The down and disconnect units are wanted from boot, active, ordered after the guests
+      ansible.builtin.shell: |
+        set -o pipefail
+        fail() { echo "FAIL: $*"; exit 1; }
+        pin=$(apt-cache policy drbd-utils); [[ $pin == *' 1001'* ]] || fail "pin not applied: $pin"
+        for d in down disconnect; do
+          u=drbd-graceful-$d.service
+          w=/etc/systemd/system/multi-user.target.wants/$u
+          [ -L $w ] && [ -e $w ] || fail "$u wants link missing"
+          systemctl show -p WantedBy --value $u | grep -qw multi-user.target || fail "$u not wanted"
+          systemctl is-active -q $u || fail "$u not active"
+          b=$(systemctl show -p Before --value $u)
+          [[ " $b " == *" example-guests.service "* ]] || fail "$u Before misses example-guests.service: $b"
+          [ "$(cat /etc/systemd/system/$u.d/50-drbd-role.conf)" = "$(printf '[Unit]\nBefore=example-guests.service')" ] \
+            || fail "$u drop-in"
+        done
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+- name: Absent after the upgrade leaves no graceful link or drop-in
+  hosts: all
+  roles:
+    - role: ../../../../ansible-role-drbd
+      vars:
+        drbd_state: absent
+  post_tasks:
+    - name: Nothing graceful remains
+      ansible.builtin.shell: |
+        fail() { echo "FAIL: $*"; exit 1; }
+        for u in drbd-graceful-shutdown drbd-graceful-down drbd-graceful-disconnect; do
+          [ ! -e /etc/systemd/system/multi-user.target.wants/$u.service ] || fail "$u still wanted"
+          [ ! -L /etc/systemd/system/multi-user.target.wants/$u.service ] || fail "$u link left"
+          [ ! -e /etc/systemd/system/$u.service.d ] || fail "$u drop-in directory left"
+        done
+      args:
+        executable: /bin/bash
+      changed_when: false

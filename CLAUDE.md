@@ -15,12 +15,13 @@ Public Ansible role `cedricfarinazzo.drbd` (installed from git; not on Ansible G
 - `meta/main.yml` — Galaxy metadata; `platforms` lists exactly what CI tests.
 - `molecule/default/` — one container per distribution: check mode on a fresh container, converge, verify (source, keyring, no other LINBIT trust, no hold, `dkms status`, `modinfo` from `updates/dkms`, files, `SPAAS=false` build, the modprobe rule, graceful units wanted, active and ordered), idempotence, `side_effect/` (masks, null leaves alone, rewired with a dangling link dropped, absent refused on a live resource and a reverse dependency, absent under `distribution`, then nothing left).
 - `molecule/failure/` — Debian 13: a download holding a secret key, a wrong fingerprint (no source, no keyring), the headers removed (stops on DKMS), a broken kernel Makefile (`make.log` tail); `converge/` records each failure, `verify/` checks it.
+- `molecule/graceful/` — Debian 12 only (LINBIT's proxmox-8 suite holds drbd-utils 9.34.x and 9.35): pinned to 9.34 by `drbd_apt_pins`, the `drbd-graceful-shutdown` unit wanted, active and ordered; `side_effect/` upgrades to 9.35 outside the role (dangling wants link), reruns the role, checks the cleanup and the down and disconnect units, then absent.
 - `tests/validate.test.sh` — good and bad inputs against `tasks/validate.yml` on localhost, with Debian or Ubuntu facts set by the play.
 - `run-tests.sh` / `Makefile` — local Molecule entry points: `run-tests.sh [-s SCENARIO] <distro>`; several distros or `all` run in parallel, one log each in `.molecule-logs/` (git-ignored).
 - `requirements.yml` — collections the role needs at runtime (consumer-facing ranges).
 - `requirements-dev.txt` — controller tooling, exact pins.
 - `package.json`, `bun.lock`, `.releaserc.json` — semantic-release tooling only.
-- `.github/workflows/` — `ci.yml` (lint, Galaxy description length, shellcheck, input tests, Molecule matrix, failure scenario), `pr-title.yml` (Conventional Commit title check), `release.yml` (semantic-release after `ci.yml` passes on `main`).
+- `.github/workflows/` — `ci.yml` (lint, Galaxy description length, shellcheck, input tests, Molecule matrix, failure and graceful scenarios), `pr-title.yml` (Conventional Commit title check), `release.yml` (semantic-release after `ci.yml` passes on `main`).
 - `renovate.json` — dependency updates.
 
 ## Conventions
@@ -61,7 +62,7 @@ Public Ansible role `cedricfarinazzo.drbd` (installed from git; not on Ansible G
 
 - Lint: `source .venv/bin/activate && yamllint . && ansible-lint && shellcheck run-tests.sh tests/*.sh`
 - Input tests: `tests/validate.test.sh`
-- Molecule: `./run-tests.sh debian13`, `./run-tests.sh -s failure debian13`, all distros in parallel: `./run-tests.sh all`
+- Molecule: `./run-tests.sh debian13`, `./run-tests.sh -s failure debian13`, `./run-tests.sh -s graceful`, all distros in parallel: `./run-tests.sh all`
 
 ## Gotchas
 
