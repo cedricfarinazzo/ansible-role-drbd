@@ -1,5 +1,6 @@
 ---
-# Each case stopped on its own check, with its own message, and left no tlshd config of the role.
+# Each case stopped on its own check, with its own message, and left no tlshd config of the role; the passing cases
+# (task and message "passed") ran through.
 - name: Verify
   hosts: all
   gather_facts: false
@@ -32,5 +33,7 @@
         - {name: mismatched-key, task: "The certificate, key and CA fit together", msg: "/root/pki/stray.key does not match"}
         - {name: key-mode, task: "The key is owned by root, mode 0600 or 0640", msg: "mode 0644"}
         - {name: key-owner, task: "The key is owned by root, mode 0600 or 0640", msg: "is owned by nobody"}
+        - {name: intermediate-truststore, task: "passed", msg: "passed"}
+        - {name: symlinked-key, task: "passed", msg: "passed"}
       loop_control:
         label: "{{ item.name }}"

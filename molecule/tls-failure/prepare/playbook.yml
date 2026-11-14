@@ -30,6 +30,7 @@
         echo 'not a certificate' > /root/not-pem.pem
         install -m 0644 /root/pki/node.key /root/key-0644.pem
         install -m 0600 -o nobody /root/pki/node.key /root/key-nobody.pem
+        ln -sf /etc/ssl/example/key.pem /root/key-link.pem
         printf 'CONFIG_KEYS=y\nCONFIG_TLS=m\nCONFIG_NET_HANDSHAKE=y\n' > /root/kernel-config
         printf 'CONFIG_KEYS=y\nCONFIG_TLS=m\n# CONFIG_NET_HANDSHAKE is not set\n' > /root/kernel-config-no-handshake
       args:

@@ -10,9 +10,11 @@
   # A fresh host in check mode may not know the packages yet
   ignore_errors: "{{ ansible_check_mode }}"
 
+# follow: a symlinked file (certbot's live/) is its target, which tlshd reads
 - name: Find the certificate, key and CA
   ansible.builtin.stat:
     path: "{{ item }}"
+    follow: true
   loop: "{{ drbd_tls_files }}"
   register: drbd_tls_stat
 
@@ -57,7 +59,8 @@
         openssl x509 -in "$ca" -noout 2> /dev/null || { echo "$ca is not a PEM CA certificate"; exit 1; }
         openssl x509 -in "$c" -noout -checkend {{ drbd_tls_cert_min_days | int * 86400 }} > /dev/null ||
           { echo "$c expired or expires within {{ drbd_tls_cert_min_days | int }} days ($(openssl x509 -in "$c" -noout -enddate))"; exit 1; }
-        openssl verify -CAfile "$ca" "$c" > /dev/null 2>&1 || { echo "$c is not signed by $ca"; exit 1; }
+        # -partial_chain: any certificate in the truststore anchors (an intermediate too), as in GnuTLS and tlshd
+        openssl verify -partial_chain -CAfile "$ca" "$c" > /dev/null 2>&1 || { echo "$c is not signed by $ca"; exit 1; }
         [ "$(openssl x509 -noout -pubkey -in "$c")" = "$(openssl pkey -pubout -in "$k" -passin pass: < /dev/null)" ] ||
           { echo "$k does not match $c"; exit 1; }
         sha256sum "$c" "$k" "$ca" | awk '{print $1}' | paste -sd' '
