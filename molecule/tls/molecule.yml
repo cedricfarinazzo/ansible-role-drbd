@@ -3,7 +3,7 @@ dependency:
   name: galaxy
 driver:
   name: docker
-# Two peers on one network, each with its own certificate from a throwaway CA
+# Three peers on one network, each with its own certificate from a throwaway CA
 platforms:
   - name: tls-a-${MOLECULE_DISTRO:-debian13}
     hostname: tls-a-${MOLECULE_DISTRO:-debian13}
@@ -18,6 +18,17 @@ platforms:
       - name: drbd-tls-${MOLECULE_DISTRO:-debian13}
   - name: tls-b-${MOLECULE_DISTRO:-debian13}
     hostname: tls-b-${MOLECULE_DISTRO:-debian13}
+    image: "geerlingguy/docker-${MOLECULE_DISTRO:-debian13}-ansible:latest"
+    command: ${MOLECULE_DOCKER_COMMAND:-""}
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    cgroupns_mode: host
+    privileged: true
+    pre_build_image: true
+    networks:
+      - name: drbd-tls-${MOLECULE_DISTRO:-debian13}
+  - name: tls-c-${MOLECULE_DISTRO:-debian13}
+    hostname: tls-c-${MOLECULE_DISTRO:-debian13}
     image: "geerlingguy/docker-${MOLECULE_DISTRO:-debian13}-ansible:latest"
     command: ${MOLECULE_DOCKER_COMMAND:-""}
     volumes:
