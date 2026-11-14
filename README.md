@@ -209,7 +209,7 @@ Nothing in the role depends on the number of peers: it sets up each host on its 
 - **Graceful shutdown** acts on the host it runs on: its units take down or disconnect every local resource, whatever the number of peers. With quorum on, a clean disconnect tells the peers this node left (unlike a crash), which is what lets DRBD keep quorum on the remaining nodes as they shrink.
 - **Kernel TLS**: tlshd trusts the CA in `drbd_tls_truststore`, not a list of peers. Give each node a certificate of that CA (its name in the SAN): a new peer needs no change on the others. The `tls` scenario runs three peers and checks a handshake between every ordered pair.
 - **Quorum** is DRBD resource configuration, which the role never writes (a resource file or LINSTOR does). With three or more nodes set `options { quorum majority; on-no-quorum io-error; }` (or `suspend-io`), in LINSTOR `DrbdOptions/Resource/quorum majority` and `DrbdOptions/Resource/on-no-quorum` on the resource group. With two copies on disk, a third node holding the resource diskless is the tiebreaker that makes a majority possible; LINSTOR adds one by itself (`DrbdOptions/auto-add-quorum-tiebreaker`, on by default). A two-node cluster without a tiebreaker can never lose a node and keep quorum: leave quorum off there and rely on fencing.
-- **The tiebreaker node** needs this role too (the module and drbd-utils), but no storage: a diskless resource only holds the metadata of the connection.
+- **The tiebreaker node** needs this role too (the module and drbd-utils), but no backing storage: a diskless resource keeps no copy of the data and only takes part in the quorum vote (a node that lost quorum cannot regain it by connecting to it alone).
 
 ## 🎯 Usage Examples
 
