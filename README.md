@@ -345,3 +345,7 @@ Once CI passes on `main`, [semantic-release](https://github.com/semantic-release
 ## 👥 Authors & Contributors
 
 **Cédric Farinazzo** ([@cedricfarinazzo](https://github.com/cedricfarinazzo)) - *Author and Maintainer*
+
+## 📄 License
+
+MIT, see [LICENSE](LICENSE).
