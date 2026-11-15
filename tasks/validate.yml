@@ -64,7 +64,7 @@
       - not drbd_tls or drbd_tls_files | reject('match', '^/[A-Za-z0-9._/-]+\Z') | list | length == 0
       - not drbd_tls or drbd_tls_files | unique | length == 3
       - not drbd_tls or drbd_tls_packages | length > 0
-      - drbd_tls_after_units is sequence and drbd_tls_after_units is not string
+      - drbd_tls_after_units is sequence and drbd_tls_after_units is not string and drbd_tls_after_units is not mapping
       - drbd_tls_after_units | map('string') | reject('match', '^[A-Za-z0-9:_.@-]+[.][a-z]+\Z') | list | length == 0
       - "'tlshd.service' not in drbd_tls_after_units"
     fail_msg: >-

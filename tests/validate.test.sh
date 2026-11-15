@@ -124,6 +124,7 @@ bad "a unit after tlshd with an embedded newline" '{"drbd_tls_after_units": ["a\
 bad "a unit after tlshd with a slash" '{"drbd_tls_after_units": ["../example.service"]}'
 bad "a unit after tlshd without a suffix" '{"drbd_tls_after_units": ["example"]}'
 bad "tlshd ordered after itself" '{"drbd_tls_after_units": ["tlshd.service"]}'
+bad "units after tlshd as a mapping" '{"drbd_tls_after_units": {"example.service": 1}}'
 
 # A newline inside a value, not only at its end: every class is an allow-list without \n or \r
 bad "a TLS certificate path with an embedded newline" '{"drbd_tls": true, "drbd_tls_private_key": "/etc/ssl/example/key.pem", "drbd_tls_truststore": "/etc/ssl/example/ca.pem", "drbd_tls_certificate": "/etc/ssl/a\nb.pem"}'
