@@ -4,7 +4,7 @@ Orientation for Claude Code sessions in this repository. `AGENTS.md` is a symlin
 
 ## Purpose
 
-Public Ansible role `cedricfarinazzo.drbd` (installed from git; not on Ansible Galaxy): the DRBD 9 kernel module built by DKMS from LINBIT's public repositories, `drbd-utils`, the module loaded now and at boot. Generic by design: no reference to any downstream project, host, user or network in code, defaults, docs or commit messages.
+Public Ansible role `cedricfarinazzo.drbd` (Ansible Galaxy): the DRBD 9 kernel module built by DKMS from LINBIT's public repositories, `drbd-utils`, the module loaded now and at boot. Generic by design: no reference to any downstream project, host, user or network in code, defaults, docs or commit messages.
 
 ## Layout
 
@@ -58,7 +58,7 @@ Public Ansible role `cedricfarinazzo.drbd` (installed from git; not on Ansible G
 
 1. A PR is squash-merged into `main` with a Conventional Commit title.
 2. When `ci.yml` passes on the push to `main`, `release.yml` (`workflow_run`) runs `bunx semantic-release`: tag, GitHub Release with notes, comments on the released PRs.
-3. The role is not on Ansible Galaxy: users install a tag from git (`README.md` Quick Start); nothing in CI pushes to Galaxy.
+3. Ansible Galaxy imports each new tag by itself; nothing in CI pushes to Galaxy.
 
 ## Commands
 
