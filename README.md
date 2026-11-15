@@ -1,6 +1,7 @@
 # 💽 Ansible Role: drbd
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Ansible Galaxy](https://img.shields.io/badge/Ansible%20Galaxy-cedricfarinazzo.drbd-blue)](https://galaxy.ansible.com/cedricfarinazzo/drbd)
 
 > **The [DRBD 9](https://linbit.com/drbd/) kernel module built by DKMS from LINBIT's public repositories, with `drbd-utils`, loaded now and at every boot.**
 
@@ -8,15 +9,13 @@ Most distribution kernels ship the DRBD 8.4 module only, while LINSTOR, DRBD Rea
 
 ## 🚀 Quick Start
 
-The role is installed from this repository (it is not on Ansible Galaxy):
+Install the role from [Ansible Galaxy](https://galaxy.ansible.com/cedricfarinazzo/drbd), pinned to a release:
 
 ```yaml
 # requirements.yml
 roles:
   - name: cedricfarinazzo.drbd
-    src: https://github.com/cedricfarinazzo/ansible-role-drbd.git
-    scm: git
-    version: 2.0.0
+    version: 2.2.1
 ```
 
 ```bash
@@ -335,7 +334,7 @@ source .venv/bin/activate && yamllint . && ansible-lint && shellcheck run-tests.
 
 ## 🚢 Releases
 
-Once CI passes on `main`, [semantic-release](https://github.com/semantic-release/semantic-release) cuts the version from [Conventional Commits](https://www.conventionalcommits.org/): `fix:` releases a patch, `feat:` a minor, a `!` or `BREAKING CHANGE:` footer a major. A squash merge lands the pull request title (checked in CI). Each release gets a bare semver tag (`1.2.3`) and GitHub release notes; install a tag with `version:` in `requirements.yml` (Quick Start). [Renovate](https://docs.renovatebot.com/) keeps the tooling and the pinned GitHub Actions up to date.
+Once CI passes on `main`, [semantic-release](https://github.com/semantic-release/semantic-release) cuts the version from [Conventional Commits](https://www.conventionalcommits.org/): `fix:` releases a patch, `feat:` a minor, a `!` or `BREAKING CHANGE:` footer a major. A squash merge lands the pull request title (checked in CI). Each release gets a bare semver tag (`1.2.3`) and GitHub release notes; Ansible Galaxy imports the new tag from the repository. Install a tag with `version:` in `requirements.yml` (Quick Start). [Renovate](https://docs.renovatebot.com/) keeps the tooling and the pinned GitHub Actions up to date.
 
 ## 📦 Dependencies
 
