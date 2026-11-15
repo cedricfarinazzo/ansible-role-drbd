@@ -100,6 +100,7 @@ bad "a deb member with a space" '{"drbd_apt_key_url": "https://mirror.example/k.
 
 good "kernel TLS on" '{"drbd_tls": true, "drbd_tls_certificate": "/etc/ssl/example/cert.pem", "drbd_tls_private_key": "/etc/ssl/example/key.pem", "drbd_tls_truststore": "/etc/ssl/example/ca.pem"}'
 good "kernel TLS, every option" '{"drbd_tls": true, "drbd_tls_certificate": "/etc/ssl/example/cert.pem", "drbd_tls_private_key": "/etc/ssl/example/key.pem", "drbd_tls_truststore": "/etc/ssl/example/ca.pem", "drbd_tls_packages": ["ktls-utils"], "drbd_tls_config_file": "/etc/tlshd/drbd.conf", "drbd_tls_kernel_check": false, "drbd_tls_kernel_config": "/proc/example-config", "drbd_tls_kernel_options": ["CONFIG_TLS", "CONFIG_NET_HANDSHAKE", "CONFIG_KEYS"], "drbd_tls_cert_min_days": 14, "drbd_tls_loglevel": 2}'
+good "units after tlshd" '{"drbd_tls": true, "drbd_tls_certificate": "/etc/ssl/example/cert.pem", "drbd_tls_private_key": "/etc/ssl/example/key.pem", "drbd_tls_truststore": "/etc/ssl/example/ca.pem", "drbd_tls_after_units": ["example-satellite.service", "drbd-example@r0.service"]}'
 good "kernel TLS off with no files" '{"drbd_tls": false}'
 bad "kernel TLS as a string" '{"drbd_tls": "yes"}'
 bad "kernel TLS on without files" '{"drbd_tls": true}'
@@ -117,6 +118,12 @@ bad "kernel options as a string" '{"drbd_tls_kernel_options": "CONFIG_TLS"}'
 bad "kernel check as a string" '{"drbd_tls_kernel_check": "no"}'
 bad "negative certificate days" '{"drbd_tls_cert_min_days": -1}'
 bad "a tlshd loglevel not a number" '{"drbd_tls_loglevel": "debug"}'
+bad "units after tlshd as a string" '{"drbd_tls_after_units": "example.service"}'
+bad "a unit after tlshd ending in a newline" '{"drbd_tls_after_units": ["example.service\n"]}'
+bad "a unit after tlshd with an embedded newline" '{"drbd_tls_after_units": ["a\nExecStart=x.service"]}'
+bad "a unit after tlshd with a slash" '{"drbd_tls_after_units": ["../example.service"]}'
+bad "a unit after tlshd without a suffix" '{"drbd_tls_after_units": ["example"]}'
+bad "tlshd ordered after itself" '{"drbd_tls_after_units": ["tlshd.service"]}'
 
 # A newline inside a value, not only at its end: every class is an allow-list without \n or \r
 bad "a TLS certificate path with an embedded newline" '{"drbd_tls": true, "drbd_tls_private_key": "/etc/ssl/example/key.pem", "drbd_tls_truststore": "/etc/ssl/example/ca.pem", "drbd_tls_certificate": "/etc/ssl/a\nb.pem"}'

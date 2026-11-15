@@ -64,12 +64,16 @@
       - not drbd_tls or drbd_tls_files | reject('match', '^/[A-Za-z0-9._/-]+\Z') | list | length == 0
       - not drbd_tls or drbd_tls_files | unique | length == 3
       - not drbd_tls or drbd_tls_packages | length > 0
+      - drbd_tls_after_units is sequence and drbd_tls_after_units is not string
+      - drbd_tls_after_units | map('string') | reject('match', '^[A-Za-z0-9:_.@-]+[.][a-z]+\Z') | list | length == 0
+      - "'tlshd.service' not in drbd_tls_after_units"
     fail_msg: >-
       drbd_tls and drbd_tls_kernel_check booleans; drbd_tls_packages a list of package names (not empty with
       drbd_tls); drbd_tls_config_file an absolute path; drbd_tls_kernel_config auto or an absolute path;
       drbd_tls_kernel_options a list of CONFIG_ names; drbd_tls_cert_min_days and drbd_tls_loglevel integers
       from 0; with drbd_tls, drbd_tls_certificate, drbd_tls_private_key and drbd_tls_truststore three distinct
-      absolute paths
+      absolute paths; drbd_tls_after_units a list of unit names (name.suffix, no slash nor newline), not
+      tlshd.service
     quiet: true
 
 - name: LINBIT source is complete

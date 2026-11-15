@@ -42,6 +42,20 @@
         executable: /bin/bash
       changed_when: false
 
+    - name: The listed unit starts after tlshd, and wants it
+      ansible.builtin.shell: |
+        set -o pipefail
+        fail() { echo "FAIL: $*"; exit 1; }
+        d=/etc/systemd/system/example-consumer.service.d/50-drbd-tls.conf
+        head -1 $d | grep -qx '# Managed by the Ansible role cedricfarinazzo.drbd' || fail "no marked drop-in"
+        grep -qx 'Wants=tlshd.service' $d || fail "drop-in Wants="
+        grep -qx 'After=tlshd.service' $d || fail "drop-in After="
+        systemctl show -p After --value example-consumer.service | tr ' ' '\n' | grep -qx tlshd.service || fail "After= lacks tlshd"
+        systemctl show -p Wants --value example-consumer.service | tr ' ' '\n' | grep -qx tlshd.service || fail "Wants= lacks tlshd"
+      args:
+        executable: /bin/bash
+      changed_when: false
+
     # Every ordered pair: nothing in the config is specific to one peer, so N peers trust each other through the CA
     - name: The configured files make a mutual TLS handshake between every pair of peers
       ansible.builtin.include_tasks: ../files/handshake.yml

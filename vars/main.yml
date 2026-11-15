@@ -83,6 +83,8 @@ drbd_tls_files:
   - "{{ drbd_tls_private_key }}"
   - "{{ drbd_tls_truststore }}"
 drbd_tls_tlshd: /usr/sbin/tlshd
+# Drop-in name in each drbd_tls_after_units unit's .d directory
+drbd_tls_after_dropin: 50-drbd-tls.conf
 drbd_tls_kernel_config_path: >-
   {{ '/boot/config-' ~ ansible_facts.kernel if drbd_tls_kernel_config == 'auto' else drbd_tls_kernel_config }}
 # The role's tlshd config found: absent then purges the TLS packages too, which the role installed

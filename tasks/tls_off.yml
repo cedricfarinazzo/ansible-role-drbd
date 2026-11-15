@@ -25,6 +25,11 @@
   changed_when: false
   failed_when: false
 
+- name: No unit ordered after tlshd by the role
+  ansible.builtin.include_tasks: tls_after.yml
+  vars:
+    drbd_tls_after_units_wanted: []
+
 # Back on the package's own configuration, if it still runs (absent purged it: nothing to restart)
 - name: Reload systemd and restart a running tlshd  # noqa: command-instead-of-module try-restart only if the unit exists
   ansible.builtin.shell: |

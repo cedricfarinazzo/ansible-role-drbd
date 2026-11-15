@@ -126,6 +126,11 @@
         mode: "0644"
       register: drbd_tls_dropin_written
 
+    - name: Units that bring DRBD TLS resources up start after tlshd
+      ansible.builtin.include_tasks: tls_after.yml
+      vars:
+        drbd_tls_after_units_wanted: "{{ drbd_tls_after_units }}"
+
     - name: The tls module loaded at boot
       ansible.builtin.copy:
         dest: "{{ drbd_tls_modules_load_file }}"
