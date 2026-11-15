@@ -1,0 +1,64 @@
+---
+# drbd_tls_after_units_wanted: the units to order after tlshd (none from tls_off). Only marked drop-ins go
+- name: Find the role's tlshd ordering drop-ins
+  ansible.builtin.find:
+    paths: /etc/systemd/system
+    patterns: "*.d"
+    file_type: directory
+  register: drbd_tls_after_dirs
+
+- name: Read the tlshd ordering drop-ins found
+  ansible.builtin.slurp:
+    src: "{{ item.path }}/{{ drbd_tls_after_dropin }}"
+  loop: "{{ drbd_tls_after_dirs.files }}"
+  loop_control:
+    label: "{{ item.path }}"
+  register: drbd_tls_after_found
+  failed_when: false
+
+- name: Drop-in directories of the units ordered after tlshd
+  ansible.builtin.file:
+    path: /etc/systemd/system/{{ item }}.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop: "{{ drbd_tls_after_units_wanted }}"
+
+- name: Units ordered after tlshd
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/{{ item }}.d/{{ drbd_tls_after_dropin }}
+    content: |
+      {{ drbd_marker }}
+      [Unit]
+      Wants=tlshd.service
+      After=tlshd.service
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ drbd_tls_after_units_wanted }}"
+  register: drbd_tls_after_written
+
+- name: Units no longer ordered after tlshd
+  ansible.builtin.file:
+    path: "{{ item.item.path }}/{{ drbd_tls_after_dropin }}"
+    state: absent
+  loop: "{{ drbd_tls_after_found.results | selectattr('content', 'defined') | list }}"
+  loop_control:
+    label: "{{ item.item.path }}"
+  when:
+    - (item.content | b64decode).startswith(drbd_marker)
+    - item.item.path | basename | regex_replace('[.]d$', '') not in drbd_tls_after_units_wanted
+  register: drbd_tls_after_removed
+
+- name: Empty drop-in directories of the units no longer ordered are removed
+  ansible.builtin.command: rmdir --ignore-fail-on-non-empty {{ item.item.item.path | quote }}
+  loop: "{{ drbd_tls_after_removed.results | selectattr('changed', 'defined') | selectattr('changed') | list }}"
+  loop_control:
+    label: "{{ item.item.item.path }}"
+  changed_when: false
+
+- name: Reload systemd for the tlshd ordering
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+  when: drbd_tls_after_written is changed or drbd_tls_after_removed is changed

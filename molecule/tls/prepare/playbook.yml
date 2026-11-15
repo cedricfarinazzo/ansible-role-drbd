@@ -20,6 +20,17 @@
           CONFIG_NET_HANDSHAKE=y
         mode: "0644"
 
+    # Stands for a service that brings DRBD TLS resources up (a LINSTOR satellite)
+    - name: A unit to order after tlshd
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/example-consumer.service
+        content: |
+          [Unit]
+          Description=Example DRBD TLS consumer
+          [Service]
+          ExecStart=/bin/sleep infinity
+        mode: "0644"
+
     - name: Test PKI script  # noqa: no-relative-paths the scenario shares it
       ansible.builtin.copy:
         src: "{{ playbook_dir }}/../files/make-pki.sh"

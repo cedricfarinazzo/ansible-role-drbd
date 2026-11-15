@@ -79,6 +79,9 @@ drbd_tls_cert_min_days: 0
 drbd_tls_config_file: /etc/tlshd-drbd.conf
 # tlshd [debug] loglevel (0 = quiet)
 drbd_tls_loglevel: 0
+# Units that bring DRBD TLS resources up (e.g. a LINSTOR satellite): each gets a drop-in with Wants= and
+# After=tlshd.service, so tlshd starts first at boot. A unit dropped from the list loses its drop-in
+drbd_tls_after_units: []
 # Stop before any change when the kernel config lacks an option below; auto = /boot/config-<running kernel>,
 # then /proc/config.gz
 drbd_tls_kernel_check: true

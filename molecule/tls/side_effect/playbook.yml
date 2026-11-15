@@ -57,6 +57,43 @@
         molecule_client_cert: /root/other-ca-cert.pem
         molecule_expect: refused
 
+    - name: Drop-in directory of an admin's unit
+      ansible.builtin.file:
+        path: /etc/systemd/system/example-admin.service.d
+        state: directory
+        mode: "0755"
+
+    - name: An admin's own drop-in of the same name, without the role's first line
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/example-admin.service.d/50-drbd-tls.conf
+        content: |
+          [Unit]
+          After=tlshd.service
+        mode: "0644"
+
+    - name: No unit listed
+      ansible.builtin.include_role:
+        name: ../../../../ansible-role-drbd
+      vars:
+        drbd_tls_after_units: []
+
+    - name: The unit dropped from the list lost its drop-in, an unmarked one stays
+      ansible.builtin.shell: |
+        set -o pipefail
+        fail() { echo "FAIL: $*"; exit 1; }
+        if [ -e /etc/systemd/system/example-consumer.service.d ]; then fail "drop-in left"; fi
+        if systemctl show -p After --value example-consumer.service | tr ' ' '\n' | grep -qx tlshd.service; then
+          fail "still after tlshd"
+        fi
+        grep -qx 'After=tlshd.service' /etc/systemd/system/example-admin.service.d/50-drbd-tls.conf || fail "admin's drop-in removed"
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: The unit listed again
+      ansible.builtin.include_role:
+        name: ../../../../ansible-role-drbd
+
     - name: Kernel TLS off
       ansible.builtin.include_role:
         name: ../../../../ansible-role-drbd
@@ -67,7 +104,8 @@
       ansible.builtin.shell: |
         set -o pipefail
         fail() { echo "FAIL: $*"; exit 1; }
-        for f in /etc/tlshd-drbd.conf /etc/systemd/system/tlshd.service.d /etc/modules-load.d/drbd-tls.conf; do
+        for f in /etc/tlshd-drbd.conf /etc/systemd/system/tlshd.service.d /etc/modules-load.d/drbd-tls.conf \
+          /etc/systemd/system/example-consumer.service.d; do
           if [ -e $f ]; then fail "$f left"; fi
         done
         dpkg-query -W -f='${db:Status-Status}' ktls-utils | grep -qx installed || fail "ktls-utils removed"

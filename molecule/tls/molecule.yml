@@ -65,6 +65,8 @@ provisioner:
         # The CI host's /boot/config-* is not in the container: a config with the options set
         drbd_tls_kernel_config: /root/kernel-config
         drbd_tls_loglevel: 1
+        drbd_tls_after_units:
+          - example-consumer.service
 verifier:
   name: ansible
 scenario:
