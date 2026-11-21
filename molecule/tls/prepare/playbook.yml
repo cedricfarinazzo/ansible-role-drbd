@@ -3,6 +3,9 @@
 - name: Prepare
   hosts: all
   tasks:
+    - name: Packages start their services, each tlshd start recorded
+      ansible.builtin.import_tasks: ../../shared/tasks/install-as-host.yml
+
     - name: OpenSSL and the GnuTLS tools (the handshake checks)
       ansible.builtin.apt:
         name:

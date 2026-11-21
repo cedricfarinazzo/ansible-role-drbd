@@ -20,6 +20,7 @@ Public Ansible role `cedricfarinazzo.drbd` (Ansible Galaxy): the DRBD 9 kernel m
 - `molecule/tls-failure/` — Debian 13: each bad kernel config, certificate, key or CA (`converge/case.yml` per case, a sibling intermediate included) stops the role on its own check before tlshd's config.
 - `molecule/guards/` — every supported distribution, no DKMS build: the reboot guard (a flag, the archive's candidate, a dummy newer `linux-image` package, once through `main.yml`) and the pin check (exact, glob, wrong, not installed), each case through `converge/case.yml`, `drbd_running_kernel` set to the archive's candidate.
 - `tests/validate.test.sh` — good and bad inputs against `tasks/validate.yml` on localhost, with Debian or Ubuntu facts set by the play.
+- `molecule/shared/tasks/` — `install-as-host.yml` (first in every prepare: the image's `policy-rc.d` removed, so packages start their services at install as on a host; a drop-in in `/run` records whether each tlshd start found the role's config and drop-in), `starts.yml` (first in every verify: `policy-rc.d` absent; after the first start, every tlshd start `role`; with `drbd_tls`, the last one `role`).
 - `run-tests.sh` / `Makefile` — local Molecule entry points: `run-tests.sh [-s SCENARIO] <distro>`; several distros or `all` run in parallel, one log each in `.molecule-logs/` (git-ignored).
 - `requirements.yml` — collections the role needs at runtime (consumer-facing ranges).
 - `requirements-dev.txt` — controller tooling, exact pins.
@@ -76,6 +77,7 @@ Public Ansible role `cedricfarinazzo.drbd` (Ansible Galaxy): the DRBD 9 kernel m
 - drbd-utils 9.35 replaced `drbd-graceful-shutdown.service` with `drbd-graceful-down.service` and `drbd-graceful-disconnect.service`; none has an `[Install]` section, so masking is a `/dev/null` link and wanting is a link in the target's `.wants/`. Only the udev rule (`SYSTEMD_WANTS` on `drbd*` block devices) pulls them in otherwise.
 - A non-empty list in a `when` fails on ansible-core's strict conditionals: test `| length > 0`.
 - A shell check in a Molecule verify ends each line in `|| fail`: a shell task's status is its last command's only.
+- `geerlingguy/docker-*-ansible` images ship `/usr/sbin/policy-rc.d` (exit 101): no postinst starts a service. Every prepare removes it. On a host, ktls-utils' postinst starts tlshd at install on the package's `/etc/tlshd.conf`, before the role's checks and config. The role then restarts it on its config; `molecule/shared/tasks/starts.yml` allows that first start only.
 - A Jinja string literal unescapes backslashes again: the kernel regex uses `[.]` and `[+]`, and the flavor is read with `regex_findall`, never a `\4` back-reference.
 - Check mode on a fresh host: no cache dir, no key, no LINBIT source. The key tasks are skipped then and the package install has `ignore_errors` in check mode; Molecule's `check` step proves it.
 - drbd-dkms's Makefile defaults `SPAAS=true` (compat patch from spaas.drbd.io when no cached patch nor local spatch fits). DKMS sources `/etc/dkms/drbd.conf` after the package's `dkms.conf`: `MAKE[0]+=" SPAAS=false"` reaches every build, kernel hooks included.

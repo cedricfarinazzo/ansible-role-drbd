@@ -1,0 +1,19 @@
+---
+# Imported first by every verify. ktls-utils' postinst starts tlshd once at install, on the package's own
+# /etc/tlshd.conf, before the role's checks: the role keeps that file and tlshd for other kernel TLS users, so that
+# first start is the only one allowed without the role's configuration. With drbd_tls, the last start had it.
+- name: Packages could start their services; every tlshd start after the install had the role's configuration
+  ansible.builtin.shell: |
+    set -o pipefail
+    fail() { echo "FAIL: $*"; exit 1; }
+    [ ! -e /usr/sbin/policy-rc.d ] || fail "/usr/sbin/policy-rc.d present: package starts were blocked"
+    f=/run/molecule-tlshd-starts
+    {% if drbd_tls | default(false) %}
+    [ -s $f ] || fail "tlshd never started"
+    [ "$(tail -1 $f)" = role ] || fail "tlshd last started without the role's configuration: $(tr '\n' ' ' < $f)"
+    {% endif %}
+    [ -e $f ] || exit 0
+    if sed 1d $f | grep -vx role; then fail "tlshd restarted without the role's configuration: $(tr '\n' ' ' < $f)"; fi
+  args:
+    executable: /bin/bash
+  changed_when: false

@@ -3,6 +3,9 @@
   hosts: all
   gather_facts: false
   tasks:
+    - name: Packages start their services, each tlshd start recorded
+      ansible.builtin.import_tasks: ../../shared/tasks/install-as-host.yml
+
     - name: Update the package cache
       ansible.builtin.apt:
         update_cache: true
