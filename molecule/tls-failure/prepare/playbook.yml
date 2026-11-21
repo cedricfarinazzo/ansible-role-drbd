@@ -33,6 +33,10 @@
         ln -sf /etc/ssl/example/key.pem /root/key-link.pem
         printf 'CONFIG_KEYS=y\nCONFIG_TLS=m\nCONFIG_NET_HANDSHAKE=y\n' > /root/kernel-config
         printf 'CONFIG_KEYS=y\nCONFIG_TLS=m\n# CONFIG_NET_HANDSHAKE is not set\n' > /root/kernel-config-no-handshake
+        # An admin's drop-in of the role's name, and one the role wrote
+        mkdir -p /etc/systemd/system/example-admin.service.d /etc/systemd/system/example-ours.service.d
+        printf '[Unit]\nAfter=network.target\n' > /etc/systemd/system/example-admin.service.d/50-drbd-tls.conf
+        printf '# Managed by the Ansible role cedricfarinazzo.drbd\n[Unit]\n' > /etc/systemd/system/example-ours.service.d/50-drbd-tls.conf
       args:
         executable: /bin/bash
         creates: /root/kernel-config

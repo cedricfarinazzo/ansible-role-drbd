@@ -20,6 +20,7 @@
         drbd_tls_private_key: "{{ molecule_case.vars.drbd_tls_private_key | default('/etc/ssl/example/key.pem') }}"
         drbd_tls_truststore: "{{ molecule_case.vars.drbd_tls_truststore | default('/etc/ssl/example/ca.pem') }}"
         drbd_tls_cert_min_days: "{{ molecule_case.vars.drbd_tls_cert_min_days | default(0) }}"
+        drbd_tls_after_units: "{{ molecule_case.vars.drbd_tls_after_units | default([]) }}"
 
     - name: Record that the role passed on the case {{ molecule_case.name }}
       ansible.builtin.copy:

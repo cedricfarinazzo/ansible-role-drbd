@@ -15,7 +15,7 @@
         [ "$(head -1 $f)" = {{ item.task | quote }} ] || fail {{ item.name }} "stopped elsewhere: $r"
         grep -qF -- {{ item.msg | quote }} $f || fail {{ item.name }} "message: $r"
         if grep '^left:' $f | grep -qE 'tlshd'; then fail {{ item.name }} "tlshd files left: $r"; fi
-        {% if item.name is match('kernel') %}
+        {% if item.name is match('kernel|foreign') %}
         if grep '^left:' $f | grep -q linbit; then fail {{ item.name }} "changed the host before the kernel check: $r"; fi
         {% endif %}
       args:
@@ -24,6 +24,7 @@
       loop:
         - {name: kernel-no-handshake, task: "The kernel has TLS and the handshake upcall", msg: "lacks CONFIG_NET_HANDSHAKE"}
         - {name: kernel-no-config, task: "The kernel config is readable", msg: "No kernel config at /root/no-such-config"}
+        - {name: foreign-dropin, task: "No listed unit holds a tlshd ordering drop-in the role did not write", msg: "example-admin.service.d/50-drbd-tls.conf does not start with the role's marker line"}
         - {name: missing, task: "The certificate, key and CA are files", msg: "/etc/ssl/example/missing.pem: no such file"}
         - {name: not-pem, task: "The certificate, key and CA fit together", msg: "is not a PEM certificate"}
         - {name: expired, task: "The certificate, key and CA fit together", msg: "expired or expires within 0 days"}
@@ -36,5 +37,17 @@
         - {name: sibling-intermediate, task: "The certificate, key and CA fit together", msg: "is not signed by /root/pki/inter.pem"}
         - {name: intermediate-truststore, task: "passed", msg: "passed"}
         - {name: symlinked-key, task: "passed", msg: "passed"}
+        - {name: marked-dropin, task: "passed", msg: "passed"}
       loop_control:
         label: "{{ item.name }}"
+
+    - name: The admin's drop-in untouched, the role's own rewritten
+      ansible.builtin.shell: |
+        set -o pipefail
+        fail() { echo "FAIL: $*"; exit 1; }
+        d=/etc/systemd/system
+        [ "$(cat $d/example-admin.service.d/50-drbd-tls.conf)" = "$(printf '[Unit]\nAfter=network.target')" ] || fail "admin's drop-in changed"
+        grep -qx 'After=tlshd.service' $d/example-ours.service.d/50-drbd-tls.conf || fail "role's drop-in not written"
+      args:
+        executable: /bin/bash
+      changed_when: false

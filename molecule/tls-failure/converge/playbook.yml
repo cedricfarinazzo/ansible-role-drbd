@@ -1,6 +1,6 @@
 ---
-# Kernel cases first: they stop before any change, so nothing of DRBD is installed yet when they run.
-# The last two must pass: a truststore holding an intermediate only, a key that is a symlink.
+# Kernel and drop-in cases first: they stop before any change, so nothing of DRBD is installed yet when they run.
+# The last three must pass: a truststore holding an intermediate only, a key that is a symlink, a drop-in the role wrote.
 - name: Converge
   hosts: all
   tasks:
@@ -9,6 +9,7 @@
       loop:
         - {name: kernel-no-handshake, vars: {drbd_tls_kernel_config: /root/kernel-config-no-handshake}}
         - {name: kernel-no-config, vars: {drbd_tls_kernel_config: /root/no-such-config}}
+        - {name: foreign-dropin, vars: {drbd_tls_after_units: [example-ours.service, example-admin.service]}}
         - {name: missing, vars: {drbd_tls_certificate: /etc/ssl/example/missing.pem}}
         - {name: not-pem, vars: {drbd_tls_certificate: /root/not-pem.pem}}
         - {name: expired, vars: {drbd_tls_certificate: /root/pki/node-expired.pem}}
@@ -21,6 +22,7 @@
         - {name: sibling-intermediate, vars: {drbd_tls_certificate: /root/pki/node-inter2.pem, drbd_tls_truststore: /root/pki/inter.pem}}
         - {name: intermediate-truststore, vars: {drbd_tls_certificate: /root/pki/node-inter.pem, drbd_tls_truststore: /root/pki/inter.pem}}
         - {name: symlinked-key, vars: {drbd_tls_private_key: /root/key-link.pem}}
+        - {name: marked-dropin, vars: {drbd_tls_after_units: [example-ours.service]}}
       loop_control:
         loop_var: molecule_case
         label: "{{ molecule_case.name }}"

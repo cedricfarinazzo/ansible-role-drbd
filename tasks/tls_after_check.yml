@@ -1,0 +1,21 @@
+---
+# Read-only, before any change: a listed unit's drop-in of the role's name without the marker is not the role's
+- name: Read the tlshd ordering drop-ins of the listed units
+  ansible.builtin.slurp:
+    src: /etc/systemd/system/{{ item }}.d/{{ drbd_tls_after_dropin }}
+  loop: "{{ drbd_tls_after_units }}"
+  register: drbd_tls_after_existing
+  failed_when: false
+
+- name: No listed unit holds a tlshd ordering drop-in the role did not write
+  ansible.builtin.assert:
+    that:
+      - drbd_tls_after_foreign | length == 0
+    fail_msg: >-
+      {{ drbd_tls_after_foreign | join(', ') }} does not start with the role's marker line: the role never replaces
+      a file it did not write. Remove it, or take its unit out of drbd_tls_after_units. Nothing was changed.
+    quiet: true
+  vars:
+    drbd_tls_after_foreign: >-
+      {% set f = [] %}{% for r in drbd_tls_after_existing.results if r.content is defined
+         and not (r.content | b64decode).startswith(drbd_marker) %}{% set _ = f.append(r.source) %}{% endfor %}{{ f }}
