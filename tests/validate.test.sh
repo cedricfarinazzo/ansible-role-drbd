@@ -97,6 +97,12 @@ bad "a source URL over ftp" '{"drbd_apt_repo_url": "ftp://packages.example/publi
 bad "a suite with a space" '{"drbd_apt_suite": "proxmox 9"}'
 bad "components as a string" '{"drbd_apt_components": "drbd-9"}'
 bad "a deb member with a space" '{"drbd_apt_key_url": "https://mirror.example/k.deb", "drbd_apt_key_deb_member": "./etc/a b.gpg"}'
+good "reboot guard and pin check on, another flag file" '{"drbd_kernel_guard": true, "drbd_kernel_guard_reboot_file": "/var/run/example-reboot", "drbd_apt_pins_check": true, "drbd_apt_pins": {"ktls-utils": "1.5.*"}}'
+bad "reboot guard as a string" '{"drbd_kernel_guard": "yes"}'
+bad "pin check as a string" '{"drbd_apt_pins_check": "true"}'
+bad "a relative reboot flag" '{"drbd_kernel_guard_reboot_file": "reboot-required"}'
+bad "a reboot flag ending in a newline" '{"drbd_kernel_guard_reboot_file": "/run/reboot-required\n"}'
+bad "a reboot flag with an embedded newline" '{"drbd_kernel_guard_reboot_file": "/run/reboot\n-required"}'
 
 good "kernel TLS on" '{"drbd_tls": true, "drbd_tls_certificate": "/etc/ssl/example/cert.pem", "drbd_tls_private_key": "/etc/ssl/example/key.pem", "drbd_tls_truststore": "/etc/ssl/example/ca.pem"}'
 good "kernel TLS, every option" '{"drbd_tls": true, "drbd_tls_certificate": "/etc/ssl/example/cert.pem", "drbd_tls_private_key": "/etc/ssl/example/key.pem", "drbd_tls_truststore": "/etc/ssl/example/ca.pem", "drbd_tls_packages": ["ktls-utils"], "drbd_tls_config_file": "/etc/tlshd/drbd.conf", "drbd_tls_kernel_check": false, "drbd_tls_kernel_config": "/proc/example-config", "drbd_tls_kernel_options": ["CONFIG_TLS", "CONFIG_NET_HANDSHAKE", "CONFIG_KEYS"], "drbd_tls_cert_min_days": 14, "drbd_tls_loglevel": 2}'

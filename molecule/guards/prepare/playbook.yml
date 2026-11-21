@@ -1,0 +1,20 @@
+---
+# The archive's candidate kernel and an installed package's version, read here so each case can name them; a
+# reboot flag where the flag cases point the role.
+- name: Prepare
+  hosts: all
+  tasks:
+    - name: APT lists
+      ansible.builtin.apt:
+        update_cache: true
+
+    - name: Read the archive's candidate kernel and the version of base-files
+      ansible.builtin.shell: |
+        set -euo pipefail
+        apt-cache depends linux-image-{{ molecule_flavor }} | awk '$1 == "Depends:" && $2 ~ /^linux-image-[0-9]/ { sub(/^linux-image-/, "", $2); print $2; exit }' > /root/candidate
+        [ -s /root/candidate ]
+        dpkg-query -W -f '${Version}' base-files > /root/base-files-version
+        touch /root/reboot-required
+      args:
+        executable: /bin/bash
+        creates: /root/candidate

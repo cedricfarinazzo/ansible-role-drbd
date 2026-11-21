@@ -5,6 +5,10 @@
 - name: DRBD 9
   when: drbd_state == 'present'
   block:
+    - name: No reboot pending
+      ansible.builtin.include_tasks: kernel_guard.yml
+      when: drbd_kernel_guard
+
     - name: Kernel TLS support
       ansible.builtin.include_tasks: tls_kernel.yml
       when: drbd_tls and drbd_tls_kernel_check
@@ -29,6 +33,10 @@
     - name: No kernel TLS by the role
       ansible.builtin.include_tasks: tls_off.yml
       when: not drbd_tls
+
+    - name: Installed versions of the pinned packages
+      ansible.builtin.include_tasks: pins_check.yml
+      when: drbd_apt_pins_check and drbd_apt_pins | length > 0
 
 - name: Remove DRBD
   ansible.builtin.include_tasks: absent.yml

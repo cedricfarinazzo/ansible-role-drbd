@@ -1,0 +1,54 @@
+---
+# Reboot guard cases, then a kernel newer than the running one installed (a dummy package), then the pin cases.
+- name: Converge
+  hosts: all
+  vars:
+    molecule_candidate: "{{ molecule_read.content | b64decode | trim }}"
+  tasks:
+    - name: Read the archive's candidate kernel
+      ansible.builtin.slurp:
+        src: /root/candidate
+      register: molecule_read
+
+    - name: Read the version of base-files
+      ansible.builtin.slurp:
+        src: /root/base-files-version
+      register: molecule_base_files
+
+    - name: Reboot guard cases
+      ansible.builtin.include_tasks: case.yml
+      loop:
+        - {name: clear, tasks_from: kernel_guard}
+        - {name: flag, tasks_from: kernel_guard, flag: /root/reboot-required}
+        - {name: candidate, tasks_from: kernel_guard, running: "1.0.0-1-{{ molecule_flavor }}"}
+        # Through the role's entry point: the guard stops it before any change
+        - {name: main-flag, guard: true, flag: /root/reboot-required}
+      loop_control:
+        loop_var: molecule_case
+        label: "{{ molecule_case.name }}"
+
+    - name: A kernel image newer than any real one, installed
+      ansible.builtin.shell: |
+        set -euo pipefail
+        d=$(mktemp -d)
+        mkdir "$d/DEBIAN"
+        printf 'Package: linux-image-99.0.0-1-{{ molecule_flavor }}\nVersion: 99.0.0-1\nArchitecture: all\nMaintainer: Example <test@example.com>\nDescription: dummy kernel image\n' > "$d/DEBIAN/control"
+        dpkg-deb --build "$d" /root/dummy-kernel.deb > /dev/null
+        dpkg -i /root/dummy-kernel.deb > /dev/null
+      args:
+        executable: /bin/bash
+        creates: /root/dummy-kernel.deb
+
+    - name: Newer kernel and pin cases
+      ansible.builtin.include_tasks: case.yml
+      loop:
+        - {name: newer, tasks_from: kernel_guard}
+        - {name: pin-exact, tasks_from: pins_check, pins: {base-files: "{{ molecule_version }}"}}
+        - {name: pin-glob, tasks_from: pins_check, pins: {base-files: "{{ molecule_version.split('.')[0] }}.*"}}
+        - {name: pin-wrong, tasks_from: pins_check, pins: {base-files: "0.1.*"}}
+        - {name: pin-missing, tasks_from: pins_check, pins: {base-files: "{{ molecule_version }}", hello: "2.*"}}
+      loop_control:
+        loop_var: molecule_case
+        label: "{{ molecule_case.name }}"
+      vars:
+        molecule_version: "{{ molecule_base_files.content | b64decode | trim }}"

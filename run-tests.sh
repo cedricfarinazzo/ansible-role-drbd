@@ -13,7 +13,8 @@ show_usage() {
     echo "failure (a wrong key fingerprint, missing kernel headers, a broken kernel Makefile: the role must stop),"
     echo "graceful (Debian 12 only: drbd-utils pinned to 9.34, then upgraded across the 9.35 unit split),"
     echo "tls (Debian only: three peers, tlshd on a test CA, restart on a new certificate, a wrong CA refused, absent),"
-    echo "tls-failure (Debian 13 only: bad certificate, key or CA, a kernel without the handshake upcall: the role must stop)."
+    echo "tls-failure (Debian 13 only: bad certificate, key or CA, a kernel without the handshake upcall: the role must stop),"
+    echo "guards (a pending reboot, a newer kernel installed or in the archive, an installed version outside its APT pin)."
     echo "Several distributions, or 'all', run in parallel; each writes .molecule-logs/<scenario>-<distro>.log."
     echo
     echo "Supported: ${SUPPORTED// /, }"
