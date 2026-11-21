@@ -1,5 +1,12 @@
 ---
 # Each check line ends in "|| fail": a shell task's status is its last command's only.
+- name: Install-time starts
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: No policy-rc.d, every tlshd start after the install on the role's configuration
+      ansible.builtin.import_tasks: ../../shared/tasks/starts.yml
+
 - name: Verify the 9.34 unit
   hosts: all
   gather_facts: false
