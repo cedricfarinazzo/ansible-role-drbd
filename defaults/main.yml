@@ -58,6 +58,15 @@ drbd_graceful_shutdown_wanted_by: multi-user.target
 # Units every graceful unit (down and disconnect) waits for at shutdown, e.g. the service that stops the VMs on DRBD devices
 drbd_graceful_shutdown_before: []
 
+# Before any change, stop when the host waits for a reboot: drbd_kernel_guard_reboot_file exists, or the newest
+# installed kernel image or the archive's candidate (the flavor's linux-image metapackage) is not the running kernel.
+# DKMS builds for the newest kernel, modprobe loads into the running one. Alone: tasks_from: kernel_guard.yml
+drbd_kernel_guard: false
+drbd_kernel_guard_reboot_file: /run/reboot-required
+# After the install, stop unless every package in drbd_apt_pins is installed at a version its glob matches:
+# APT ignores a pin no available version matches and installs another version silently
+drbd_apt_pins_check: false
+
 # Lines of the DKMS make.log printed when a build fails
 drbd_dkms_log_lines: 40
 

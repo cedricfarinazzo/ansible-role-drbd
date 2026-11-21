@@ -59,6 +59,9 @@ drbd_graceful_dropin: 50-drbd-role.conf
 # Debian 6.12.116+deb13-amd64, 6.1.0-28-cloud-amd64; Ubuntu 6.8.0-45-generic: the flavor is the last group
 drbd_kernel_release_re: '^[0-9]+[.][0-9]+([.][0-9]+)?([+]deb[0-9]+)?(-[0-9]+)?-([a-z0-9-]+)$'
 drbd_kernel_flavor: "{{ (ansible_facts.kernel | regex_findall(drbd_kernel_release_re) | first | default(['']))[-1] }}"
+# The kernel the reboot guard compares with: a container runs its host's kernel, so a test sets it
+drbd_running_kernel: "{{ ansible_facts.kernel }}"
+drbd_guard_flavor: "{{ (drbd_running_kernel | regex_findall(drbd_kernel_release_re) | first | default(['']))[-1] }}"
 drbd_headers_package: >-
   {{ 'linux-headers-' ~ drbd_kernel_flavor if drbd_kernel_headers_package == 'auto' else drbd_kernel_headers_package }}
 

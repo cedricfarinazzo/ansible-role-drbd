@@ -58,6 +58,8 @@ provisioner:
         drbd_apt_pins:
           drbd-utils: "9.*"
           ktls-utils: "1.5.*"
+        # Stop if a pin fell back to another version
+        drbd_apt_pins_check: true
         drbd_tls: true
         drbd_tls_certificate: /etc/ssl/example/cert.pem
         drbd_tls_private_key: /etc/ssl/example/key.pem

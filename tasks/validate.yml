@@ -35,6 +35,8 @@
       - drbd_graceful_shutdown_before | map('string') | reject('match', '^[A-Za-z0-9:_.@-]+[.][a-z]+\Z')
         | list | length == 0
       - drbd_dkms_log_lines | string is match('^[0-9]+\Z') and drbd_dkms_log_lines | int > 0
+      - drbd_kernel_guard is boolean and drbd_apt_pins_check is boolean
+      - drbd_kernel_guard_reboot_file is string and drbd_kernel_guard_reboot_file is match('^/[A-Za-z0-9._/-]+\Z')
     fail_msg: >-
       drbd_state present|absent; drbd_install_method linbit|distribution; drbd_apt_keyring an absolute path;
       drbd_packages non-empty and drbd_packages_extra lists of package names; drbd_kernel_headers_package
@@ -43,7 +45,8 @@
       drbd_dkms_spaas, drbd_dkms_local_spatch and drbd_usage_count booleans; drbd_mask_graceful_shutdown and
       drbd_graceful_shutdown null or booleans, not both true; drbd_graceful_shutdown_wanted_by a target; drbd_graceful_shutdown_before a list of unit
       names; drbd_module_options
-      a mapping of lower-case names to plain values; drbd_dkms_log_lines above 0
+      a mapping of lower-case names to plain values; drbd_dkms_log_lines above 0; drbd_kernel_guard and
+      drbd_apt_pins_check booleans; drbd_kernel_guard_reboot_file an absolute path
     quiet: true
 
 # Paths reach tlshd's config and openssl: absolute, no space nor quote

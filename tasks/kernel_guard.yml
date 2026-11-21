@@ -1,0 +1,64 @@
+---
+# DKMS builds for the newest installed kernel, modprobe loads into the running one: a host waiting for a reboot gets
+# a module it cannot load. Reads only (also in check mode); runs alone with tasks_from, so it checks its own inputs.
+- name: The reboot guard can read the running kernel
+  ansible.builtin.assert:
+    that:
+      - drbd_kernel_guard_reboot_file is string and drbd_kernel_guard_reboot_file is match('^/[A-Za-z0-9._/-]+\Z')
+      - drbd_guard_flavor | length > 0
+    fail_msg: >-
+      drbd_kernel_guard_reboot_file must be an absolute path, and the running kernel {{ drbd_running_kernel }}
+      a <version>-<flavor> release (e.g. 6.12.116+deb13-amd64, 6.8.0-45-generic)
+    quiet: true
+
+- name: Find the reboot flag
+  ansible.builtin.stat:
+    path: "{{ drbd_kernel_guard_reboot_file }}"
+  register: drbd_guard_reboot
+
+- name: Find the newest installed kernel of the flavor
+  ansible.builtin.shell: >-
+    set -o pipefail;
+    dpkg-query -W -f='${db:Status-Status} ${Package}\n' 'linux-image-[0-9]*-{{ drbd_guard_flavor }}' 2>/dev/null |
+    awk '$1 == "installed" { sub(/^linux-image-/, "", $2); print $2 }' | sort -V | tail -1
+  args:
+    executable: /bin/bash
+  register: drbd_guard_newest
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+# apt-cache reads the lists on disk: a stale cache hides a newer kernel in the archive
+- name: Refresh the APT lists
+  ansible.builtin.apt:
+    update_cache: true
+  changed_when: false
+  check_mode: false
+
+# Security-only upgrades can leave the archive's kernel newer than any installed: the headers metapackage then pulls
+# headers for a kernel that does not run, and DKMS has none for the running one
+- name: Find the archive's candidate kernel of the flavor
+  ansible.builtin.shell: >-
+    set -o pipefail;
+    apt-cache depends linux-image-{{ drbd_guard_flavor }} 2>/dev/null |
+    awk '$1 == "Depends:" && $2 ~ /^linux-image-[0-9]/ { sub(/^linux-image-/, "", $2); print $2; exit }'
+  args:
+    executable: /bin/bash
+  register: drbd_guard_candidate
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: No reboot is pending
+  ansible.builtin.assert:
+    that:
+      - not drbd_guard_reboot.stat.exists
+      - drbd_guard_newest.stdout | default('') | length == 0 or drbd_guard_newest.stdout == drbd_running_kernel
+      - drbd_guard_candidate.stdout | default('') | length == 0 or drbd_guard_candidate.stdout == drbd_running_kernel
+    fail_msg: >-
+      {{ inventory_hostname }} waits for a reboot (running {{ drbd_running_kernel }}, newest installed
+      {{ drbd_guard_newest.stdout | default('') or 'none' }}, archive candidate
+      {{ drbd_guard_candidate.stdout | default('') or 'none' }}, {{ drbd_kernel_guard_reboot_file }}
+      {{ 'present' if drbd_guard_reboot.stat.exists else 'absent' }}): upgrade the kernel, reboot, then run again.
+      Nothing was changed.
+    quiet: true

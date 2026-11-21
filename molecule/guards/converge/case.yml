@@ -1,0 +1,36 @@
+---
+# One case: the rescue records the failed task, its message and what the run left; a passing case records "passed".
+- name: Case {{ molecule_case.name }}
+  block:
+    - name: Run the role on the case {{ molecule_case.name }}
+      ansible.builtin.include_role:
+        name: ../../../../ansible-role-drbd
+        tasks_from: "{{ molecule_case.tasks_from | default('main') }}"
+      vars:
+        drbd_running_kernel: "{{ molecule_case.running | default(molecule_candidate) }}"
+        drbd_kernel_guard: "{{ molecule_case.guard | default(false) }}"
+        drbd_kernel_guard_reboot_file: "{{ molecule_case.flag | default('/root/no-flag') }}"
+        drbd_apt_pins: "{{ molecule_case.pins | default({}) }}"
+
+    - name: Record that the role passed on the case {{ molecule_case.name }}
+      ansible.builtin.copy:
+        dest: /root/molecule-guard-{{ molecule_case.name }}
+        content: "passed\npassed\nleft:\n"
+        mode: "0644"
+  rescue:
+    - name: Find what the failed run left
+      ansible.builtin.shell: |
+        ls -d /etc/apt/sources.list.d/linbit.sources /etc/apt/preferences.d/drbd.pref 2> /dev/null || true
+      register: molecule_left
+      changed_when: false
+
+    - name: Record the failure of the case {{ molecule_case.name }}
+      ansible.builtin.copy:
+        dest: /root/molecule-guard-{{ molecule_case.name }}
+        content: "{{ ansible_failed_task.name }}\n{{ molecule_msg }}\nleft:{{ molecule_left.stdout_lines | join(' ') }}\n"
+        mode: "0644"
+      vars:
+        # A looped task fails with "One or more items failed": the items' own messages say why
+        molecule_msg: >-
+          {{ ([ansible_failed_result.msg | default('')] + ansible_failed_result.results | default([])
+              | selectattr('failed', 'defined') | selectattr('failed') | map(attribute='msg') | list) | join(' ') }}

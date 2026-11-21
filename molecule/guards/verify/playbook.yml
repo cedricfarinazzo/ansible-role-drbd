@@ -1,0 +1,44 @@
+---
+# Each case stopped on its own check with its own message, or passed; nothing of the role was written.
+- name: Verify
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Read the archive's candidate kernel and the version of base-files
+      ansible.builtin.slurp:
+        src: "{{ item }}"
+      loop:
+        - /root/candidate
+        - /root/base-files-version
+      register: molecule_read
+
+    - name: Each case stopped where it should, or passed
+      ansible.builtin.shell: |
+        set -o pipefail
+        fail() { echo "FAIL $1: $2"; exit 1; }
+        f=/root/molecule-guard-{{ item.name }}
+        [ -f $f ] || fail {{ item.name }} "not run"
+        r=$(cat $f)
+        [ "$(head -1 $f)" = {{ item.task | quote }} ] || fail {{ item.name }} "stopped elsewhere: $r"
+        grep -qF -- {{ item.msg | quote }} $f || fail {{ item.name }} "message: $r"
+        if [ -n "$(grep '^left:' $f | cut -d: -f2-)" ]; then fail {{ item.name }} "changed the host: $r"; fi
+      args:
+        executable: /bin/bash
+      changed_when: false
+      loop:
+        - {name: clear, task: passed, msg: passed}
+        - {name: flag, task: No reboot is pending, msg: "/root/reboot-required present"}
+        - {name: candidate, task: No reboot is pending, msg: "archive candidate {{ molecule_candidate }}"}
+        - {name: main-flag, task: No reboot is pending, msg: "running {{ molecule_candidate }}, newest installed none"}
+        - {name: newer, task: No reboot is pending, msg: "newest installed 99.0.0-1-"}
+        - {name: pin-exact, task: passed, msg: passed}
+        - {name: pin-glob, task: passed, msg: passed}
+        - {name: pin-wrong, task: Every pinned package is installed at a version its pin matches,
+           msg: "base-files {{ molecule_version }} is not 0.1.*"}
+        - {name: pin-missing, task: Every pinned package is installed at a version its pin matches,
+           msg: "hello not installed is not 2.*"}
+      loop_control:
+        label: "{{ item.name }}"
+      vars:
+        molecule_candidate: "{{ molecule_read.results[0].content | b64decode | trim }}"
+        molecule_version: "{{ molecule_read.results[1].content | b64decode | trim }}"
