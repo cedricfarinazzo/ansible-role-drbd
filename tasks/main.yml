@@ -13,6 +13,10 @@
       ansible.builtin.include_tasks: tls_kernel.yml
       when: drbd_tls and drbd_tls_kernel_check
 
+    - name: No foreign tlshd ordering drop-in
+      ansible.builtin.include_tasks: tls_after_check.yml
+      when: drbd_tls and drbd_tls_after_units | length > 0
+
     - name: LINBIT source and key
       ansible.builtin.include_tasks: repo.yml
       when: drbd_install_method == 'linbit'
