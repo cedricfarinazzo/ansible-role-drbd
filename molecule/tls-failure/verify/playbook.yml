@@ -1,6 +1,13 @@
 ---
 # Each case stopped on its own check, with its own message, and left no tlshd config of the role; the passing cases
 # (task and message "passed") ran through.
+- name: Install-time starts
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: No policy-rc.d, every tlshd start after the install on the role's configuration
+      ansible.builtin.import_tasks: ../../shared/tasks/starts.yml
+
 - name: Verify
   hosts: all
   gather_facts: false
